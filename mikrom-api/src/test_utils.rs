@@ -2,8 +2,8 @@ use crate::AppState;
 use crate::application::ApiContext;
 use crate::application::vms::MeshStatus;
 use crate::domain::{
-    MockAppRepository, MockDatabaseRepository, MockGithubRepository, MockScheduler,
-    MockUserRepository, MockVolumeRepository,
+    MockAppRepository, MockDatabaseRepository, MockGithubRepository,
+    MockPersonalAccessTokenRepository, MockScheduler, MockUserRepository, MockVolumeRepository,
 };
 use crate::infrastructure::nats::{MockNatsClient, TypedNatsClient};
 use sqlx::{Connection, Executor, PgConnection, PgPool, postgres::PgPoolOptions};
@@ -193,6 +193,7 @@ pub fn create_test_app_state(db: PgPool) -> AppState {
     let database_repo = Arc::new(MockDatabaseRepository::new());
     let github_repo = Arc::new(MockGithubRepository::new());
     let volume_repo = Arc::new(MockVolumeRepository::new());
+    let personal_access_token_repo = Arc::new(MockPersonalAccessTokenRepository::new());
     let scheduler = Arc::new(MockScheduler::new());
     let nats = TypedNatsClient::new_custom(Arc::new(MockNatsClient::new()));
 
@@ -285,6 +286,7 @@ pub fn create_test_app_state(db: PgPool) -> AppState {
         volume_repo: volume_repo.clone(),
         plan_tier_repo: Arc::new(plan_tier_repo),
         tenant_usage_repo: Arc::new(tenant_usage_repo),
+        personal_access_token_repo: personal_access_token_repo.clone(),
         scheduler: scheduler.clone(),
         nats: nats.clone(),
         db: db.clone(),

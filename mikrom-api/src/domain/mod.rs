@@ -3,6 +3,7 @@ pub mod database;
 pub mod error;
 pub mod github;
 pub mod nats;
+pub mod personal_access_token;
 pub mod plan_tier;
 pub mod scheduler;
 pub mod tenant;
@@ -22,6 +23,10 @@ pub use database::{
 pub use error::{DomainError, DomainResult};
 pub use github::{GithubRepository, MockGithubRepository, UserGithubAccount};
 pub use nats::NatsClient;
+pub use personal_access_token::{
+    CreatedTokenResponse, MockPersonalAccessTokenRepository, PersonalAccessToken,
+    PersonalAccessTokenRepository,
+};
 pub use plan_tier::{
     MockPlanTierRepository, MockTenantUsageRepository, PlanLimits, PlanTier, PlanTierRepository,
     TenantUsage, TenantUsageRepository, TierSlug,

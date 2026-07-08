@@ -1616,3 +1616,60 @@ export async function deleteAccount(token: string) {
     return { success: false, error: error instanceof Error ? error.message : "Network error" };
   }
 }
+
+export interface PersonalAccessToken {
+  id: string;
+  user_id: string;
+  name: string;
+  token_last_four: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface CreatedTokenResponse {
+  token: string;
+  details: PersonalAccessToken;
+}
+
+export async function listPersonalAccessTokens(token: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/auth/tokens`, { headers: authHeaders(token) });
+    if (response.status === 401) logout();
+    const result = await parseJson<PersonalAccessToken[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to load tokens") };
+    return { data: result as PersonalAccessToken[] };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function createPersonalAccessToken(token: string, name: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/auth/tokens`, {
+      method: "POST",
+      headers: { ...authHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (response.status === 401) logout();
+    const result = await parseJson<CreatedTokenResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to create token") };
+    return { data: result as CreatedTokenResponse };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function revokePersonalAccessToken(token: string, tokenId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/auth/tokens/${tokenId}`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+    });
+    if (response.status === 401) logout();
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to revoke token") };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Network error" };
+  }
+}

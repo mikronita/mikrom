@@ -71,6 +71,7 @@ mod delete_database_tests {
             volume_repo: Arc::new(crate::domain::MockVolumeRepository::new()),
             plan_tier_repo: Arc::new(crate::domain::MockPlanTierRepository::new()),
             tenant_usage_repo: Arc::new(crate::domain::MockTenantUsageRepository::new()),
+            personal_access_token_repo: Arc::new(crate::domain::MockPersonalAccessTokenRepository::new()),
             scheduler: scheduler.clone(),
             nats: TypedNatsClient::default(),
             db: sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap(),

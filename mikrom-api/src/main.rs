@@ -8,8 +8,8 @@ use mikrom_api::create_app_with_rate_limits;
 use mikrom_api::infrastructure::db;
 use mikrom_api::infrastructure::db::{
     PostgresAppRepository, PostgresDatabaseRepository, PostgresGithubRepository,
-    PostgresPlanTierRepository, PostgresTenantRepository, PostgresTenantUsageRepository,
-    PostgresUserRepository, PostgresVolumeRepository,
+    PostgresPersonalAccessTokenRepository, PostgresPlanTierRepository, PostgresTenantRepository,
+    PostgresTenantUsageRepository, PostgresUserRepository, PostgresVolumeRepository,
 };
 
 fn bind_ipv6_dual_stack_listener(port: u16) -> anyhow::Result<TcpListener> {
@@ -74,6 +74,8 @@ async fn main() -> anyhow::Result<()> {
     let volume_repo = Arc::new(PostgresVolumeRepository::new(db_pool.clone()));
     let plan_tier_repo = Arc::new(PostgresPlanTierRepository::new(db_pool.clone()));
     let tenant_usage_repo = Arc::new(PostgresTenantUsageRepository::new(db_pool.clone()));
+    let personal_access_token_repo =
+        Arc::new(PostgresPersonalAccessTokenRepository::new(db_pool.clone()));
 
     tracing::info!("Connecting to NATS at {}...", config.nats_url);
     // Disable the client's built-in request timeout so the application-level
@@ -103,6 +105,7 @@ async fn main() -> anyhow::Result<()> {
         volume_repo.clone(),
         plan_tier_repo.clone(),
         tenant_usage_repo.clone(),
+        personal_access_token_repo.clone(),
         scheduler.clone(),
         nats.clone(),
         db_pool.clone(),

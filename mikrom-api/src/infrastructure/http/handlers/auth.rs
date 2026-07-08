@@ -294,6 +294,106 @@ pub async fn delete_account(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
+pub struct CreateTokenRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Serialize, rovo::schemars::JsonSchema)]
+pub struct CreatedTokenResponse {
+    pub token: String,
+    pub details: crate::domain::personal_access_token::PersonalAccessToken,
+}
+
+#[rovo::rovo]
+pub async fn create_personal_access_token(
+    auth: crate::AuthUser,
+    State(state): State<AppState>,
+    Json(payload): Json<CreateTokenRequest>,
+) -> ApiResult<(StatusCode, Json<CreatedTokenResponse>)> {
+    if payload.name.trim().is_empty() {
+        return Err(crate::error::ApiError::BadRequest("Token name cannot be empty".to_string()));
+    }
+
+    let user_id = uuid::Uuid::parse_str(&auth.user_id)
+        .map_err(|_| crate::error::ApiError::Auth("Invalid user ID".to_string()))?;
+
+    use rand::distr::{Alphanumeric, SampleString};
+    use rand::rng;
+    
+    let token_secret = Alphanumeric.sample_string(&mut rng(), 32);
+    let full_token = format!("mikrom_pat_{}", token_secret);
+
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(full_token.as_bytes());
+    let token_hash = hex::encode(hasher.finalize());
+
+    let token_last_four = if full_token.len() >= 4 {
+        full_token[full_token.len() - 4..].to_string()
+    } else {
+        full_token.clone()
+    };
+
+    let token_id = uuid::Uuid::new_v4();
+
+    let details = state
+        .ctx
+        .personal_access_token_repo
+        .create(token_id, user_id, payload.name, token_hash, token_last_four)
+        .await
+        .map_err(|e| crate::error::ApiError::Internal(e.to_string()))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(CreatedTokenResponse {
+            token: full_token,
+            details,
+        }),
+    ))
+}
+
+#[rovo::rovo]
+pub async fn list_personal_access_tokens(
+    auth: crate::AuthUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<Vec<crate::domain::personal_access_token::PersonalAccessToken>>> {
+    let user_id = uuid::Uuid::parse_str(&auth.user_id)
+        .map_err(|_| crate::error::ApiError::Auth("Invalid user ID".to_string()))?;
+
+    let tokens = state
+        .ctx
+        .personal_access_token_repo
+        .list_by_user(user_id)
+        .await
+        .map_err(|e| crate::error::ApiError::Internal(e.to_string()))?;
+
+    Ok(Json(tokens))
+}
+
+#[rovo::rovo]
+pub async fn revoke_personal_access_token(
+    auth: crate::AuthUser,
+    State(state): State<AppState>,
+    axum::extract::Path(token_id): axum::extract::Path<uuid::Uuid>,
+) -> ApiResult<StatusCode> {
+    let user_id = uuid::Uuid::parse_str(&auth.user_id)
+        .map_err(|_| crate::error::ApiError::Auth("Invalid user ID".to_string()))?;
+
+    let deleted = state
+        .ctx
+        .personal_access_token_repo
+        .delete(token_id, user_id)
+        .await
+        .map_err(|e| crate::error::ApiError::Internal(e.to_string()))?;
+
+    if !deleted {
+        return Err(crate::error::ApiError::NotFound("Token not found".to_string()));
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1081,6 +1181,108 @@ mod tests {
         };
 
         let response = __delete_account_impl(auth, State(state)).await;
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn test_create_list_revoke_personal_access_tokens() {
+        let user_id = Uuid::new_v4();
+
+        let mut mock_pat_repo = crate::domain::MockPersonalAccessTokenRepository::new();
+        
+        let test_token = crate::domain::personal_access_token::PersonalAccessToken {
+            id: Uuid::new_v4(),
+            user_id,
+            name: "test-token".to_string(),
+            token_last_four: "abcd".to_string(),
+            created_at: Utc::now(),
+            last_used_at: None,
+        };
+        let _create_token_details = test_token.clone();
+        mock_pat_repo
+            .expect_create()
+            .returning(move |_, _, name, _, _| {
+                Ok(crate::domain::personal_access_token::PersonalAccessToken {
+                    id: Uuid::new_v4(),
+                    user_id,
+                    name,
+                    token_last_four: "abcd".to_string(),
+                    created_at: Utc::now(),
+                    last_used_at: None,
+                })
+            });
+
+        let list_tokens = vec![test_token.clone()];
+        mock_pat_repo
+            .expect_list_by_user()
+            .returning(move |_| {
+                Ok(list_tokens.clone())
+            });
+
+        mock_pat_repo
+            .expect_delete()
+            .returning(|_, _| Ok(true));
+
+        let mut ctx = crate::application::ApiContext::default();
+        ctx.personal_access_token_repo = Arc::new(mock_pat_repo);
+
+        let state = AppState {
+            ctx: ctx.clone(),
+            user_repo: Arc::new(MockUserRepository::new()),
+            tenant_repo: Arc::new(MockTenantRepository::new()),
+            app_repo: Arc::new(MockAppRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
+            github_repo: Arc::new(MockGithubRepository::default()),
+            volume_repo: Arc::new(MockVolumeRepository::new()),
+            scheduler: Arc::new(crate::domain::MockScheduler::new()),
+            nats: crate::nats::TypedNatsClient::new_custom(Arc::new(
+                crate::nats::MockNatsClient::new(),
+            )),
+            router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
+            api_db: sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://localhost/dummy")
+                .unwrap(),
+            jwt_secret: "secret".to_string(),
+            master_key: "key".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
+            workspace_events: tokio::sync::broadcast::channel(1).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
+            acme_email: "admin@mikrom.spluca.org".to_string(),
+            acme_staging: true,
+            acme_check_interval: 3600,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+            active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
+        };
+
+        let auth = crate::AuthUser {
+            user_id: user_id.to_string(),
+            email: "test@example.com".to_string(),
+            role: crate::domain::UserRole::User,
+        };
+
+        let payload = CreateTokenRequest {
+            name: "test-token".to_string(),
+        };
+        let response = __create_personal_access_token_impl(auth.clone(), State(state.clone()), Json(payload)).await;
+        assert!(response.is_ok());
+        let (status, Json(created)) = response.unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(created.token.starts_with("mikrom_pat_"));
+        assert_eq!(created.details.name, "test-token");
+
+        let response = __list_personal_access_tokens_impl(auth.clone(), State(state.clone())).await;
+        assert!(response.is_ok());
+        let Json(list) = response.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "test-token");
+
+        let response = __revoke_personal_access_token_impl(auth, State(state), axum::extract::Path(test_token.id)).await;
         assert!(response.is_ok());
         assert_eq!(response.unwrap(), StatusCode::NO_CONTENT);
     }

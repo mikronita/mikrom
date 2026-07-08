@@ -80,18 +80,49 @@ where
         let state = crate::AppState::from_ref(state);
         let claims = parts.extensions.get::<crate::auth::jwt::Claims>().cloned();
 
-        let claims = if let Some(claims) = claims {
-            claims
+        if let Some(claims) = claims {
+            Ok(auth_user_from_claims(claims))
         } else {
             // 1. Get token from Authorization header OR query parameter (for SSE)
             let token = extract_token_from_headers_and_uri(&parts.headers, &parts.uri)?;
 
-            // 2. Decode and validate JWT
-            crate::auth::jwt::verify_token(&token, &state.jwt_secret)
-                .map_err(|_| ApiError::Auth("Invalid or expired token".into()))?
-        };
+            // 2. Check if it's a Personal Access Token
+            if token.starts_with("mikrom_pat_") {
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(token.as_bytes());
+                let token_hash = hex::encode(hasher.finalize());
 
-        Ok(auth_user_from_claims(claims))
+                let result = state
+                    .ctx
+                    .personal_access_token_repo
+                    .find_by_hash(&token_hash)
+                    .await
+                    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+                if let Some((pat, user)) = result {
+                    // Update last used in the background
+                    let repo = state.ctx.personal_access_token_repo.clone();
+                    tokio::spawn(async move {
+                        let _ = repo.update_last_used(pat.id).await;
+                    });
+
+                    return Ok(AuthUser {
+                        user_id: user.id.to_string(),
+                        email: user.email,
+                        role: user.role,
+                    });
+                } else {
+                    return Err(ApiError::Auth("Invalid personal access token".into()));
+                }
+            }
+
+            // 3. Decode and validate JWT
+            let claims = crate::auth::jwt::verify_token(&token, &state.jwt_secret)
+                .map_err(|_| ApiError::Auth("Invalid or expired token".into()))?;
+
+            Ok(auth_user_from_claims(claims))
+        }
     }
 }
 

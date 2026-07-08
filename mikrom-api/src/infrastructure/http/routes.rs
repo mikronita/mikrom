@@ -13,7 +13,8 @@ use tracing::Level;
 
 use crate::infrastructure::http::handlers::{
     auth::{
-        change_password, delete_account, disable_totp, get_profile, login, register, setup_totp,
+        change_password, create_personal_access_token, delete_account, disable_totp, get_profile,
+        list_personal_access_tokens, login, register, revoke_personal_access_token, setup_totp,
         update_profile, upload_avatar, verify_totp,
     },
     billing::{
@@ -107,6 +108,14 @@ pub fn create_app_with_rate_limits(
         .route(
             &format!("{}/auth/2fa/disable", crate::API_V1),
             post(disable_totp),
+        )
+        .route(
+            &format!("{}/auth/tokens", crate::API_V1),
+            get(list_personal_access_tokens).post(create_personal_access_token),
+        )
+        .route(
+            &format!("{}/auth/tokens/{{token_id}}", crate::API_V1),
+            delete(revoke_personal_access_token),
         )
         .route(
             &format!("{}/billing", crate::API_V1),
