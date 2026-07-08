@@ -11,7 +11,6 @@
     Badge,
     Button,
     Card,
-    CardContent,
     CardDescription,
     CardFooter,
     CardHeader,
@@ -40,7 +39,6 @@
 
   let settingUp2fa = $state(false);
   let totpSecret = $state("");
-  let totpUrl = $state("");
   let qrCodeDataUrl = $state("");
   let totpCode = $state("");
   let verifying2fa = $state(false);
@@ -112,7 +110,6 @@
 
     if (result.data) {
       totpSecret = result.data.secret;
-      totpUrl = result.data.otpauth_url;
       qrCodeDataUrl = await QRCode.toDataURL(result.data.otpauth_url, {
         width: 300,
         margin: 2,
@@ -143,7 +140,6 @@
     await refreshProfile();
     showTotpDialog = false;
     totpSecret = "";
-    totpUrl = "";
     qrCodeDataUrl = "";
     totpCode = "";
   }
@@ -151,7 +147,6 @@
   function handleCancelTotpSetup() {
     showTotpDialog = false;
     totpSecret = "";
-    totpUrl = "";
     qrCodeDataUrl = "";
     totpCode = "";
   }

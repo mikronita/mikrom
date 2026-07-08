@@ -16,8 +16,10 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test"
   },
-  "overrides": {
-    "cookie": "0.7.2"
+  "pnpm": {
+    "overrides": {
+      "cookie": "0.7.2"
+    }
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",

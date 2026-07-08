@@ -564,7 +564,7 @@ async fn create_customer_session(
     return_url: &str,
 ) -> ApiResult<String> {
     let response = http_client()
-        .post(polar_api_url(&settings.base_url, "/customer-sessions/"))
+        .post(polar_api_url(&settings.base_url, "/customer-sessions"))
         .bearer_auth(&settings.access_token)
         .json(&serde_json::json!({
             "external_customer_id": tenant.id.to_string(),
@@ -635,7 +635,7 @@ async fn create_customer_in_polar(
     email: &str,
 ) -> ApiResult<()> {
     let response = http_client()
-        .post(polar_api_url(&settings.base_url, "/customers/"))
+        .post(polar_api_url(&settings.base_url, "/customers"))
         .bearer_auth(&settings.access_token)
         .json(&serde_json::json!({
             "external_id": external_customer_id,
@@ -687,7 +687,7 @@ async fn create_checkout_session(
     success_url: &str,
 ) -> ApiResult<String> {
     let response = http_client()
-        .post(polar_api_url(&settings.base_url, "/checkouts/"))
+        .post(polar_api_url(&settings.base_url, "/checkouts"))
         .bearer_auth(&settings.access_token)
         .json(&serde_json::json!({
             "products": [product_id],
@@ -1748,7 +1748,7 @@ mod tests {
         let success_url = "http://localhost:3000/settings?tab=billing&checkout=success";
 
         Mock::given(method("POST"))
-            .and(path("/checkouts/"))
+            .and(path("/checkouts"))
             .and(header("authorization", "Bearer polar-token"))
             .and(body_json(json!({
                 "products": ["prod_checkout"],
@@ -1763,7 +1763,7 @@ mod tests {
             .await;
 
         Mock::given(method("POST"))
-            .and(path("/customer-sessions/"))
+            .and(path("/customer-sessions"))
             .and(header("authorization", "Bearer polar-token"))
             .and(body_json(json!({
                 "external_customer_id": tenant.id.to_string(),
@@ -1801,7 +1801,7 @@ mod tests {
         let success_url = "http://localhost:3000/settings?tab=billing&checkout=success";
 
         Mock::given(method("POST"))
-            .and(path("/checkouts/"))
+            .and(path("/checkouts"))
             .and(header("authorization", "Bearer polar-token"))
             .respond_with(
                 ResponseTemplate::new(422)
@@ -1843,7 +1843,7 @@ mod tests {
             .await;
 
         Mock::given(method("POST"))
-            .and(path("/customers/"))
+            .and(path("/customers"))
             .and(header("authorization", "Bearer polar-token"))
             .and(body_json(json!({
                 "external_id": tenant.id.to_string(),
@@ -1854,7 +1854,7 @@ mod tests {
             .await;
 
         Mock::given(method("POST"))
-            .and(path("/customer-sessions/"))
+            .and(path("/customer-sessions"))
             .and(header("authorization", "Bearer polar-token"))
             .and(body_json(json!({
                 "external_customer_id": tenant.id.to_string(),
@@ -1891,7 +1891,7 @@ mod tests {
         let polar_email = polar_customer_email_for_tenant(email, tenant.id);
 
         Mock::given(method("POST"))
-            .and(path("/customers/"))
+            .and(path("/customers"))
             .and(header("authorization", "Bearer polar-token"))
             .and(body_json(json!({
                 "external_id": tenant.id.to_string(),
@@ -1932,7 +1932,7 @@ mod tests {
         let polar_email = polar_customer_email_for_tenant(email, tenant.id);
 
         Mock::given(method("POST"))
-            .and(path("/customers/"))
+            .and(path("/customers"))
             .and(header("authorization", "Bearer polar-token"))
             .and(body_json(json!({
                 "external_id": tenant.id.to_string(),
