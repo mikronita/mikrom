@@ -1,18 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { UserProfile } from "$lib/api";
-import { getToken } from "$lib/auth";
-import { getUserProfile } from "$lib/api";
 
-vi.mock("$lib/auth", () => ({
+const mocks = vi.hoisted(() => ({
   getToken: vi.fn(),
-}));
-
-vi.mock("$lib/api", () => ({
   getUserProfile: vi.fn(),
 }));
 
-const mockedGetToken = vi.mocked(getToken);
-const mockedGetUserProfile = vi.mocked(getUserProfile);
+vi.mock("$lib/auth", () => ({
+  getToken: mocks.getToken,
+}));
+
+vi.mock("$lib/api", () => ({
+  getUserProfile: mocks.getUserProfile,
+}));
 
 const cachedProfile: UserProfile = {
   id: "user-1",
@@ -33,8 +33,8 @@ const updatedProfile: UserProfile = {
 beforeEach(() => {
   vi.resetModules();
   localStorage.clear();
-  mockedGetToken.mockReset();
-  mockedGetUserProfile.mockReset();
+  mocks.getToken.mockReset();
+  mocks.getUserProfile.mockReset();
 });
 
 describe("profile store", () => {
@@ -50,8 +50,8 @@ describe("profile store", () => {
 
     expect(current).toEqual(cachedProfile);
 
-    mockedGetToken.mockReturnValue("token");
-    mockedGetUserProfile.mockResolvedValue({ data: updatedProfile });
+    mocks.getToken.mockReturnValue("token");
+    mocks.getUserProfile.mockResolvedValue({ data: updatedProfile });
 
     await refreshProfile();
 
@@ -66,7 +66,7 @@ describe("profile store", () => {
 
     const { refreshProfile } = await import("$lib/stores/profile");
 
-    mockedGetToken.mockReturnValue(null);
+    mocks.getToken.mockReturnValue(null);
 
     await refreshProfile();
 
