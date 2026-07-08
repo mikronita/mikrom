@@ -445,6 +445,49 @@ async fn create_project_creates_tenant_for_user() {
     let owner_user_id = Uuid::new_v4();
     let mut state = build_state(tenant_id, owner_user_id);
 
+    let mut plan_tier_repo = mikrom_api::domain::MockPlanTierRepository::new();
+    plan_tier_repo.expect_get_default_tier().returning(|| {
+        Ok(mikrom_api::domain::plan_tier::PlanTier {
+            id: Uuid::new_v4(),
+            polar_product_id: None,
+            tier_slug: mikrom_api::domain::plan_tier::TierSlug::Free,
+            name: "Free".to_string(),
+            max_apps: 3,
+            max_databases: 3,
+            max_volumes: 3,
+            max_vcpus_total: 2,
+            max_memory_mb_total: 1024,
+            max_storage_gb_total: 5,
+            max_deployments_per_app: 10,
+            max_team_members: 1,
+            autoscaling_allowed: false,
+            custom_domains: false,
+            trial_days: 0,
+            is_default: true,
+            sort_order: 0,
+            created_at: chrono::Utc::now(),
+        })
+    });
+    plan_tier_repo.expect_assign_to_tenant().returning(|_, _| Ok(()));
+    state.ctx.plan_tier_repo = Arc::new(plan_tier_repo);
+
+    let mut tenant_usage_repo = mikrom_api::domain::MockTenantUsageRepository::new();
+    tenant_usage_repo.expect_get_or_create().returning(|tenant_id| {
+        Ok(mikrom_api::domain::plan_tier::TenantUsage {
+            tenant_id,
+            apps_count: 0,
+            databases_count: 0,
+            volumes_count: 0,
+            vcpus_total: 0,
+            memory_mb_total: 0,
+            storage_gb_total: 0,
+            deployments_count: 0,
+            bandwidth_gb_billed: 0,
+            updated_at: chrono::Utc::now(),
+        })
+    });
+    state.ctx.tenant_usage_repo = Arc::new(tenant_usage_repo);
+
     let created_tenant = Tenant {
         id: Uuid::new_v4(),
         tenant_id: "xyz789".to_string(),

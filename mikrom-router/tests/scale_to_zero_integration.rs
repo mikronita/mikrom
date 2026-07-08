@@ -136,7 +136,8 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
             scheduled_at BIGINT,
             started_at BIGINT,
             stopped_at BIGINT,
-            error_message TEXT
+            error_message TEXT,
+            volumes JSONB NOT NULL DEFAULT '[]'::jsonb
         )
         ",
     )
@@ -277,6 +278,79 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
         github_webhook_url_base: None,
         active_deployment_flows: Arc::new(dashmap::DashSet::new()),
     };
+    let mut plan_tier_repo = mikrom_api::domain::MockPlanTierRepository::new();
+    plan_tier_repo.expect_get_default_tier().returning(|| {
+        Ok(mikrom_api::domain::plan_tier::PlanTier {
+            id: uuid::Uuid::new_v4(),
+            polar_product_id: None,
+            tier_slug: mikrom_api::domain::plan_tier::TierSlug::Free,
+            name: "Free".to_string(),
+            max_apps: 3,
+            max_databases: 3,
+            max_volumes: 3,
+            max_vcpus_total: 2,
+            max_memory_mb_total: 1024,
+            max_storage_gb_total: 5,
+            max_deployments_per_app: 10,
+            max_team_members: 1,
+            autoscaling_allowed: false,
+            custom_domains: false,
+            trial_days: 0,
+            is_default: true,
+            sort_order: 0,
+            created_at: chrono::Utc::now(),
+        })
+    });
+    plan_tier_repo.expect_get_tenant_tier().returning(|_| {
+        Ok(mikrom_api::domain::plan_tier::PlanTier {
+            id: uuid::Uuid::new_v4(),
+            polar_product_id: None,
+            tier_slug: mikrom_api::domain::plan_tier::TierSlug::Free,
+            name: "Free".to_string(),
+            max_apps: 3,
+            max_databases: 3,
+            max_volumes: 3,
+            max_vcpus_total: 2,
+            max_memory_mb_total: 1024,
+            max_storage_gb_total: 5,
+            max_deployments_per_app: 10,
+            max_team_members: 1,
+            autoscaling_allowed: false,
+            custom_domains: false,
+            trial_days: 0,
+            is_default: true,
+            sort_order: 0,
+            created_at: chrono::Utc::now(),
+        })
+    });
+    plan_tier_repo.expect_assign_to_tenant().returning(|_, _| Ok(()));
+
+    let mut tenant_usage_repo = mikrom_api::domain::MockTenantUsageRepository::new();
+    tenant_usage_repo.expect_get_or_create().returning(|tenant_id| {
+        Ok(mikrom_api::domain::plan_tier::TenantUsage {
+            tenant_id,
+            apps_count: 0,
+            databases_count: 0,
+            volumes_count: 0,
+            vcpus_total: 0,
+            memory_mb_total: 0,
+            storage_gb_total: 0,
+            deployments_count: 0,
+            bandwidth_gb_billed: 0,
+            updated_at: chrono::Utc::now(),
+        })
+    });
+    tenant_usage_repo.expect_increment_apps().returning(|_, _, _, _, _| Ok(()));
+    tenant_usage_repo.expect_decrement_apps().returning(|_, _, _, _| Ok(()));
+    tenant_usage_repo.expect_increment_databases().returning(|_, _| Ok(()));
+    tenant_usage_repo.expect_decrement_databases().returning(|_| Ok(()));
+    tenant_usage_repo.expect_increment_volumes().returning(|_, _, _| Ok(()));
+    tenant_usage_repo.expect_decrement_volumes().returning(|_, _| Ok(()));
+    tenant_usage_repo.expect_increment_deployments().returning(|_, _| Ok(()));
+    tenant_usage_repo.expect_decrement_deployments().returning(|_| Ok(()));
+
+    api_state.ctx.plan_tier_repo = Arc::new(plan_tier_repo);
+    api_state.ctx.tenant_usage_repo = Arc::new(tenant_usage_repo);
     api_state.ctx.user_repo = api_state.user_repo.clone();
     api_state.ctx.tenant_repo = api_state.tenant_repo.clone();
     api_state.ctx.app_repo = api_state.app_repo.clone();

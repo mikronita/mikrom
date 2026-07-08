@@ -39,6 +39,7 @@ fn completion_subcommand_generates_fish() {
 #[test]
 fn system_health_with_no_server_fails() {
     let mut cmd = Command::cargo_bin("mikrom").unwrap();
+    cmd.env("MIKROM_API_URL", "http://localhost:1");
     cmd.args(["--no-color", "system", "health"]);
     // Should fail because there is no server running
     cmd.assert().failure().stderr(contains("Error:"));

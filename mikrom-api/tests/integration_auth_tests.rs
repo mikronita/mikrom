@@ -122,7 +122,7 @@ async fn register_creates_tenant_and_emits_profile_flow_inputs() {
     .unwrap();
 
     assert_eq!(result.user.id, user_id);
-    assert!(result.token.len() > 10);
+    assert!(result.token.as_ref().unwrap().len() > 10);
 }
 
 #[tokio::test]
@@ -150,12 +150,12 @@ async fn login_returns_token_for_valid_credentials() {
     });
 
     let state = build_state(Arc::new(user_repo), Arc::new(MockTenantRepository::new()));
-    let result = AuthService::login(&state, email.to_string(), password.to_string())
+    let result = AuthService::login(&state, email.to_string(), password.to_string(), None)
         .await
         .unwrap();
 
     assert_eq!(result.user.id, user_id);
-    assert!(result.token.len() > 10);
+    assert!(result.token.as_ref().unwrap().len() > 10);
 }
 
 #[tokio::test]
@@ -181,7 +181,7 @@ async fn login_rejects_invalid_password() {
     });
 
     let state = build_state(Arc::new(user_repo), Arc::new(MockTenantRepository::new()));
-    let result = AuthService::login(&state, email.to_string(), "wrong-password".to_string()).await;
+    let result = AuthService::login(&state, email.to_string(), "wrong-password".to_string(), None).await;
 
     assert!(result.is_err());
 }
@@ -276,9 +276,7 @@ async fn change_password_success() {
             deleted_at: None,
         }))
     });
-    user_repo
-        .expect_update_password()
-        .returning(|_, _| Ok(()));
+    user_repo.expect_update_password().returning(|_, _| Ok(()));
 
     let state = build_state(Arc::new(user_repo), Arc::new(MockTenantRepository::new()));
     let result = AuthService::change_password(
@@ -356,8 +354,16 @@ async fn setup_totp_returns_secret_and_url() {
         .unwrap();
 
     assert!(!result.secret.is_empty());
-    assert!(result.otpauth_url.starts_with("otpauth://"), "URL: {}", result.otpauth_url);
-    assert!(result.otpauth_url.contains("issuer=Mikrom"), "URL: {}", result.otpauth_url);
+    assert!(
+        result.otpauth_url.starts_with("otpauth://"),
+        "URL: {}",
+        result.otpauth_url
+    );
+    assert!(
+        result.otpauth_url.contains("issuer=Mikrom"),
+        "URL: {}",
+        result.otpauth_url
+    );
 }
 
 #[tokio::test]
@@ -392,9 +398,7 @@ async fn disable_totp_clears_secret_and_flag() {
     let user_id = Uuid::new_v4();
 
     let mut user_repo = MockUserRepository::new();
-    user_repo
-        .expect_disable_totp()
-        .returning(|_| Ok(()));
+    user_repo.expect_disable_totp().returning(|_| Ok(()));
 
     let state = build_state(Arc::new(user_repo), Arc::new(MockTenantRepository::new()));
     let result = AuthService::disable_totp(&state, &user_id.to_string()).await;
@@ -506,9 +510,7 @@ async fn delete_account_marks_deleted_at() {
     let user_id = Uuid::new_v4();
 
     let mut user_repo = MockUserRepository::new();
-    user_repo
-        .expect_soft_delete()
-        .returning(|_| Ok(()));
+    user_repo.expect_soft_delete().returning(|_| Ok(()));
 
     let state = build_state(Arc::new(user_repo), Arc::new(MockTenantRepository::new()));
     let result = AuthService::delete_account(&state, &user_id.to_string()).await;

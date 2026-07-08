@@ -142,17 +142,18 @@ impl AuthService {
         if user.totp_enabled {
             if let Some(code) = code {
                 // User provided code, verify it
-                let secret = user
-                    .totp_secret
-                    .clone()
-                    .ok_or(ApiError::Internal("User has 2FA enabled but no secret".into()))?;
+                let secret = user.totp_secret.clone().ok_or(ApiError::Internal(
+                    "User has 2FA enabled but no secret".into(),
+                ))?;
 
                 let totp = TOTP::new(
                     totp_rs::Algorithm::SHA1,
                     6,
                     1,
                     30,
-                    Secret::Encoded(secret).to_bytes().map_err(|e| ApiError::Internal(e.to_string()))?,
+                    Secret::Encoded(secret)
+                        .to_bytes()
+                        .map_err(|e| ApiError::Internal(e.to_string()))?,
                     None,
                     String::new(),
                 )
@@ -342,11 +343,7 @@ impl AuthService {
         })
     }
 
-    pub async fn verify_totp(
-        state: &AppState,
-        auth_user_id: &str,
-        code: String,
-    ) -> ApiResult<()> {
+    pub async fn verify_totp(state: &AppState, auth_user_id: &str, code: String) -> ApiResult<()> {
         let user_id = Uuid::parse_str(auth_user_id)
             .map_err(|_| ApiError::Auth("Invalid user ID in token".into()))?;
 
@@ -357,16 +354,18 @@ impl AuthService {
             .map_err(|e| ApiError::Internal(e.to_string()))?
             .ok_or(ApiError::NotFound("User not found".into()))?;
 
-        let secret = user
-            .totp_secret
-            .ok_or(ApiError::BadRequest("2FA not set up. Request setup first.".into()))?;
+        let secret = user.totp_secret.ok_or(ApiError::BadRequest(
+            "2FA not set up. Request setup first.".into(),
+        ))?;
 
         let totp = TOTP::new(
             totp_rs::Algorithm::SHA1,
             6,
             1,
             30,
-            Secret::Encoded(secret).to_bytes().map_err(|e| ApiError::Internal(e.to_string()))?,
+            Secret::Encoded(secret)
+                .to_bytes()
+                .map_err(|e| ApiError::Internal(e.to_string()))?,
             None,
             String::new(),
         )

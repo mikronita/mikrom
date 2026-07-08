@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use async_nats::Client;
 use std::env;
 

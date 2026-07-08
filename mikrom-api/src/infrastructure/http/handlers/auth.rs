@@ -654,7 +654,9 @@ mod tests {
             6,
             1,
             30,
-            Secret::Encoded("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP".to_string()).to_bytes().unwrap(),
+            Secret::Encoded("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP".to_string())
+                .to_bytes()
+                .unwrap(),
             None,
             String::new(),
         )
@@ -791,9 +793,7 @@ mod tests {
                 deleted_at: None,
             }))
         });
-        mock_repo
-            .expect_update_password()
-            .returning(|_, _| Ok(()));
+        mock_repo.expect_update_password().returning(|_, _| Ok(()));
 
         let state = AppState {
             ctx: crate::application::ApiContext::default(),

@@ -86,9 +86,7 @@ pub fn create_app_with_rate_limits(
         )
         .route(
             &format!("{}/auth/me", crate::API_V1),
-            get(get_profile)
-                .put(update_profile)
-                .delete(delete_account),
+            get(get_profile).put(update_profile).delete(delete_account),
         )
         .route(
             &format!("{}/auth/me/avatar", crate::API_V1),

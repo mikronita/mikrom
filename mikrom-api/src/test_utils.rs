@@ -205,6 +205,76 @@ pub fn create_test_app_state(db: PgPool) -> AppState {
         frontend_url: "http://localhost:3000".to_string(),
         ..Default::default()
     };
+    let mut plan_tier_repo = crate::domain::MockPlanTierRepository::new();
+    plan_tier_repo.expect_get_default_tier().returning(|| {
+        Ok(crate::domain::plan_tier::PlanTier {
+            id: uuid::Uuid::new_v4(),
+            polar_product_id: None,
+            tier_slug: crate::domain::plan_tier::TierSlug::Free,
+            name: "Free".to_string(),
+            max_apps: 3,
+            max_databases: 3,
+            max_volumes: 3,
+            max_vcpus_total: 2,
+            max_memory_mb_total: 1024,
+            max_storage_gb_total: 5,
+            max_deployments_per_app: 10,
+            max_team_members: 1,
+            autoscaling_allowed: false,
+            custom_domains: false,
+            trial_days: 0,
+            is_default: true,
+            sort_order: 0,
+            created_at: chrono::Utc::now(),
+        })
+    });
+    plan_tier_repo.expect_get_tenant_tier().returning(|_| {
+        Ok(crate::domain::plan_tier::PlanTier {
+            id: uuid::Uuid::new_v4(),
+            polar_product_id: None,
+            tier_slug: crate::domain::plan_tier::TierSlug::Free,
+            name: "Free".to_string(),
+            max_apps: 3,
+            max_databases: 3,
+            max_volumes: 3,
+            max_vcpus_total: 2,
+            max_memory_mb_total: 1024,
+            max_storage_gb_total: 5,
+            max_deployments_per_app: 10,
+            max_team_members: 1,
+            autoscaling_allowed: false,
+            custom_domains: false,
+            trial_days: 0,
+            is_default: true,
+            sort_order: 0,
+            created_at: chrono::Utc::now(),
+        })
+    });
+    plan_tier_repo.expect_assign_to_tenant().returning(|_, _| Ok(()));
+
+    let mut tenant_usage_repo = crate::domain::MockTenantUsageRepository::new();
+    tenant_usage_repo.expect_get_or_create().returning(|tenant_id| {
+        Ok(crate::domain::plan_tier::TenantUsage {
+            tenant_id,
+            apps_count: 0,
+            databases_count: 0,
+            volumes_count: 0,
+            vcpus_total: 0,
+            memory_mb_total: 0,
+            storage_gb_total: 0,
+            deployments_count: 0,
+            bandwidth_gb_billed: 0,
+            updated_at: chrono::Utc::now(),
+        })
+    });
+    tenant_usage_repo.expect_increment_apps().returning(|_, _, _, _, _| Ok(()));
+    tenant_usage_repo.expect_decrement_apps().returning(|_, _, _, _| Ok(()));
+    tenant_usage_repo.expect_increment_databases().returning(|_, _| Ok(()));
+    tenant_usage_repo.expect_decrement_databases().returning(|_| Ok(()));
+    tenant_usage_repo.expect_increment_volumes().returning(|_, _, _| Ok(()));
+    tenant_usage_repo.expect_decrement_volumes().returning(|_, _| Ok(()));
+    tenant_usage_repo.expect_increment_deployments().returning(|_, _| Ok(()));
+    tenant_usage_repo.expect_decrement_deployments().returning(|_| Ok(()));
 
     let ctx = ApiContext {
         user_repo: user_repo.clone(),
@@ -213,8 +283,8 @@ pub fn create_test_app_state(db: PgPool) -> AppState {
         database_repo: database_repo.clone(),
         github_repo: github_repo.clone(),
         volume_repo: volume_repo.clone(),
-        plan_tier_repo: Arc::new(crate::domain::MockPlanTierRepository::new()),
-        tenant_usage_repo: Arc::new(crate::domain::MockTenantUsageRepository::new()),
+        plan_tier_repo: Arc::new(plan_tier_repo),
+        tenant_usage_repo: Arc::new(tenant_usage_repo),
         scheduler: scheduler.clone(),
         nats: nats.clone(),
         db: db.clone(),
