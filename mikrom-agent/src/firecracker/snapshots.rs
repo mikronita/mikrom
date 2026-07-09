@@ -199,7 +199,7 @@ impl crate::firecracker::FirecrackerManager {
             vm.status = VmStatus::Paused;
         }
         drop(vms);
-        let _ = self.persist_runtime_state().await;
+        let _ = self.persist_runtime_state_to_disk().await;
 
         tracing::info!(vm_id = %vm_id, "VM paused and process terminated successfully");
         Ok(())
@@ -284,7 +284,7 @@ impl crate::firecracker::FirecrackerManager {
                 vm.status = VmStatus::Running;
             }
             drop(vms);
-            let _ = self.persist_runtime_state().await;
+            let _ = self.persist_runtime_state_to_disk().await;
             return Ok(());
         }
 
@@ -299,7 +299,7 @@ impl crate::firecracker::FirecrackerManager {
                 let mut processes = self.processes.lock().await;
                 processes.remove(vm_id);
             }
-            let _ = self.persist_runtime_state().await;
+            let _ = self.persist_runtime_state_to_disk().await;
         }
 
         let vm_info = self
@@ -322,7 +322,7 @@ impl crate::firecracker::FirecrackerManager {
                 vm.status = VmStatus::Stopped;
             }
         }
-        let _ = self.persist_runtime_state().await;
+        let _ = self.persist_runtime_state_to_disk().await;
 
         let vm_info = self
             .get_vm(vm_id)

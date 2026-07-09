@@ -357,7 +357,7 @@ impl crate::firecracker::FirecrackerManager {
         }
 
         if updated_state {
-            let _ = self.persist_runtime_state().await;
+            let _ = self.persist_runtime_state_to_disk().await;
         }
 
         let loaded_vms_count = self.vms.read().await.len();
@@ -372,7 +372,7 @@ impl crate::firecracker::FirecrackerManager {
         Ok(())
     }
 
-    pub(crate) async fn persist_runtime_state(&self) -> anyhow::Result<()> {
+    pub(crate) async fn persist_runtime_state_to_disk(&self) -> anyhow::Result<()> {
         let state_path = self.runtime_state_path();
         let tmp_path = state_path.with_extension("json.tmp");
         let vms = self.vms.read().await;

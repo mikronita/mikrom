@@ -424,7 +424,7 @@ impl FirecrackerManager {
                 );
             }
         }
-        let _ = self.persist_runtime_state().await;
+        let _ = self.persist_runtime_state_to_disk().await;
 
         {
             self.logs
@@ -688,7 +688,7 @@ impl FirecrackerManager {
         }
 
         self.processes.lock().await.insert(vm_id, vm_process);
-        let _ = self.persist_runtime_state().await;
+        let _ = self.persist_runtime_state_to_disk().await;
         tracing::info!(vm_id = %vm_id, "Firecracker VM successfully started");
         Ok(())
     }
@@ -859,7 +859,7 @@ impl FirecrackerManager {
             vm.status = VmStatus::Stopped;
         }
         drop(vms);
-        let _ = self.persist_runtime_state().await;
+        let _ = self.persist_runtime_state_to_disk().await;
 
         Ok(())
     }
@@ -924,7 +924,7 @@ impl FirecrackerManager {
             let mut vms = self.vms.write().await;
             vms.remove(vm_id);
         }
-        let _ = self.persist_runtime_state().await;
+        let _ = self.persist_runtime_state_to_disk().await;
 
         // Best-effort cleanup of any leftover artifacts.
         self.cleanup_process_paths(vm_id, None).await;
@@ -964,7 +964,7 @@ impl FirecrackerManager {
             vm.error_message = Some(msg.clone());
         }
         drop(vms);
-        let _ = self.persist_runtime_state().await;
+        let _ = self.persist_runtime_state_to_disk().await;
 
         self.publish_vm_failure_event(vm_id, msg).await;
     }
@@ -1143,7 +1143,7 @@ impl VmHypervisor for FirecrackerManager {
     }
 
     async fn persist_runtime_state(&self) -> Result<(), HypervisorError> {
-        self.persist_runtime_state()
+        self.persist_runtime_state_to_disk()
             .await
             .map_err(|e| HypervisorError::ProcessError(e.to_string()))
     }
@@ -2165,7 +2165,7 @@ server.close()
         }
         drop(processes);
 
-        mgr.persist_runtime_state().await.unwrap();
+        mgr.persist_runtime_state_to_disk().await.unwrap();
 
         let raw = tokio::fs::read_to_string(mgr.runtime_state_path())
             .await
