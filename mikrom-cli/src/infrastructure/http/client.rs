@@ -630,6 +630,33 @@ impl ApiClient for ReqwestApiClient {
         )
         .await
     }
+
+    async fn list_personal_access_tokens(&self) -> CliResult<Vec<PersonalAccessToken>> {
+        self.request(
+            reqwest::Method::GET,
+            "auth/tokens",
+            None::<()>,
+        )
+        .await
+    }
+
+    async fn create_personal_access_token(&self, name: &str) -> CliResult<CreatedTokenResponse> {
+        self.request(
+            reqwest::Method::POST,
+            "auth/tokens",
+            Some(CreateTokenRequest { name: name.to_string() }),
+        )
+        .await
+    }
+
+    async fn revoke_personal_access_token(&self, token_id: &str) -> CliResult<()> {
+        self.request_no_body(
+            reqwest::Method::DELETE,
+            &format!("auth/tokens/{}", token_id),
+            self.delete_timeout,
+        )
+        .await
+    }
 }
 
 #[cfg(test)]

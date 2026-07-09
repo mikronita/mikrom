@@ -102,7 +102,7 @@ mod tests {
     use super::*;
     use mikrom_cli::commands::{
         AppCommands, AuthCommands, ConfigCommands, DbCommands, DeploymentCommands, OutputFormat,
-        SystemCommands, VolumeSnapshotCommands,
+        SystemCommands, VolumeSnapshotCommands, PatCommands,
     };
 
     #[test]
@@ -778,6 +778,38 @@ mod tests {
                 assert_eq!(snapshot, "my-snap");
             },
             _ => panic!("expected db snapshot-delete"),
+        }
+    }
+
+    #[test]
+    fn test_cli_pat_list_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "pat", "list"]).unwrap();
+        match cli.command {
+            Commands::Pat(PatCommands::List) => {},
+            _ => panic!("expected pat list"),
+        }
+    }
+
+    #[test]
+    fn test_cli_pat_create_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "pat", "create", "my-token"]).unwrap();
+        match cli.command {
+            Commands::Pat(PatCommands::Create { name }) => {
+                assert_eq!(name, "my-token");
+            },
+            _ => panic!("expected pat create"),
+        }
+    }
+
+    #[test]
+    fn test_cli_pat_revoke_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "pat", "revoke", "token-123", "--yes"]).unwrap();
+        match cli.command {
+            Commands::Pat(PatCommands::Revoke { id, yes }) => {
+                assert_eq!(id, "token-123");
+                assert!(yes);
+            },
+            _ => panic!("expected pat revoke"),
         }
     }
 }

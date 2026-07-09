@@ -36,6 +36,9 @@ pub enum Commands {
     /// Database Management (Neon)
     #[command(subcommand)]
     Db(DbCommands),
+    /// Personal Access Token Management
+    #[command(subcommand)]
+    Pat(PatCommands),
     /// Project Management
     #[command(subcommand)]
     Project(ProjectCommands),
@@ -408,5 +411,23 @@ pub enum ProjectCommands {
         /// 6-char project slug
         #[arg(index = 1)]
         tenant_id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PatCommands {
+    /// List all Personal Access Tokens
+    List,
+    /// Create a new Personal Access Token
+    Create {
+        /// Descriptive name for the token
+        name: String,
+    },
+    /// Revoke a Personal Access Token
+    Revoke {
+        /// ID of the token to revoke
+        id: String,
+        #[arg(long, short, help = "Skip confirmation prompt")]
+        yes: bool,
     },
 }

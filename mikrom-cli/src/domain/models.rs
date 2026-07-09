@@ -274,3 +274,24 @@ pub struct DatabaseSnapshotNameRequest {
 pub struct DatabaseRestoreSnapshotRequest {
     pub snapshot_name: String,
 }
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct PersonalAccessToken {
+    pub id: String,
+    pub user_id: String,
+    pub name: String,
+    pub token_last_four: String,
+    pub created_at: String,
+    pub last_used_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct CreatedTokenResponse {
+    pub token: String,
+    pub details: PersonalAccessToken,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct CreateTokenRequest {
+    pub name: String,
+}
