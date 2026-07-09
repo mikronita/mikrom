@@ -391,12 +391,21 @@ logs-observability: ## Follow observability logs
 
 # ── Housekeeping ──────────────────────────────────────────────────────────────
 
+.PHONY: setup-git-hooks
+setup-git-hooks: ## Configure git hooks to run pre-commit.sh
+	@mkdir -p .git/hooks
+	@echo '#!/usr/bin/env bash' > .git/hooks/pre-commit
+	@echo 'exec "$$(git rev-parse --show-toplevel)/scripts/pre-commit.sh"' >> .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "✅ Git pre-commit hook installed!"
+
 .PHONY: clean
 clean: ## Remove Rust build artefacts
 	cargo clean
 
 .PHONY: check
 check: fmt-check clippy test ## Run all checks (Rust)
+
 
 .PHONY: help
 help: ## Show this help
