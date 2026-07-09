@@ -8,9 +8,9 @@ Mikrom is a Rust-first platform-as-a-service that deploys containerized workload
 
 ## Repository Layout
 
-- `mikrom-api`: Axum REST API for auth, apps, deployments, and database provisioning.
+- `mikrom-api`: Axum REST API for auth, user notification settings, Personal Access Tokens (PATs), apps, deployments, VM/database snapshots, and Neon-backed database provisioning.
 - `mikrom-app`: SvelteKit dashboard built with Svelte 5, Tailwind CSS 4, shadcn-svelte, and bits-ui.
-- `mikrom-agent`: Worker daemon that manages microVM lifecycle, metrics, and host coordination.
+- `mikrom-agent`: Worker daemon that manages microVM lifecycle (Firecracker/Cloud Hypervisor, process recovery, atomic state persistence), metrics, and host coordination.
 - `mikrom-agent-ebpf`: eBPF program for the agent data plane.
 - `mikrom-agent-ebpf-common`: Shared types between the agent and its eBPF program.
 - `mikrom-builder`: Build engine that turns Git repositories into OCI images.
@@ -33,9 +33,9 @@ Mikrom is a Rust-first platform-as-a-service that deploys containerized workload
 
 ### Service Responsibilities
 
-- `mikrom-api`: auth, app lifecycle, deployment orchestration, secrets, and Neon-backed database provisioning.
+- `mikrom-api`: auth, personal access tokens (PATs), user notification preferences, app lifecycle, deployment orchestration, VM/database snapshots/backups/branching, secrets, and Neon-backed database provisioning.
 - `mikrom-scheduler`: worker registry, scheduling decisions, and cluster state coordination over NATS.
-- `mikrom-agent`: VM lifecycle, host metrics, NATS command handling, and eBPF-backed data plane integration.
+- `mikrom-agent`: VM lifecycle (with Firecracker/Cloud Hypervisor, atomic state persistence, and OS-level recovery checks), host metrics, NATS command handling, and eBPF-backed data plane integration.
 - `mikrom-network`: mesh orchestration, route synchronization, and key handling.
 - `mikrom-router`: ingress routing, health checks, TLS, and traffic observability.
 

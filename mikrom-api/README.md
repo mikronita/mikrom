@@ -15,12 +15,15 @@
 
 ## Responsibilities
 
-- Authentication and profile management.
+- Authentication and profile management (including user notification preferences).
+- Personal Access Token (PAT) management for programmatic API access.
 - Application lifecycle and deployment orchestration.
+- Deployment VM snapshot management (snapshots list, create, restore, and delete orchestration).
 - Secret storage and retrieval for applications.
 - GitHub webhook handling for automated deploys.
 - Rate limiting and request classification.
 - Database provisioning through Neon when configured, with PostgreSQL workloads running on the platform's Cloud Hypervisor-backed microVM path.
+- Database branching, backup, and snapshot orchestration for Neon databases.
 - Database records persist the PostgreSQL major version and expose it back through list, detail, and create responses.
 
 ## Runtime Notes

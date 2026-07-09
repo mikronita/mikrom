@@ -138,6 +138,25 @@ mikrom db connection <database-id>
 - the `psql` command to connect through the tunnel
 - a JSON form with the same connection metadata via `--output json`
 
+For personal access tokens (PATs) and platform notifications:
+
+```bash
+mikrom pat create "CI Token"
+mikrom pat list
+mikrom notification list --unread-only
+```
+
+For VM snapshots and database operations (branching, backups, and snapshots):
+
+```bash
+mikrom deployment snapshots --app my-app --job-id <job-id>
+mikrom deployment snapshot-create --app my-app --job-id <job-id> snap-v1
+mikrom db branches <database-id>
+mikrom db backup <database-id>
+mikrom db snapshots <database-id>
+mikrom db snapshot-create <database-id> snap-db-v1
+```
+
 ### Deployment Presets
 
 When you deploy an app from the UI or CLI, Mikrom currently offers the same resource presets:

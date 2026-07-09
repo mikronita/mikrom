@@ -29,6 +29,7 @@
 - The agent starts a singleton NAT64 translator on the host bridge and expects `mikrom-dns` to provide DNS64 answers for external names.
 - Build output for the eBPF program is consumed from `target/bpfel-unknown-none/release/mikrom-agent-ebpf`.
 - On systemd deployments, load `DT_API_TOKEN` from `/etc/mikrom/dynatrace.env` instead of embedding it in `agent.env`. A template is provided at `debian/etc/mikrom/dynatrace.env.example`.
+- The agent implements atomic state persistence for running VM metadata (writing to a temporary file before an atomic rename) to avoid corruption, and optimizes Cloud Hypervisor process recovery with proper SIGTERM/SIGKILL handling via libc to prevent process stub leaks.
 
 ### Timeout configuration
 
@@ -69,6 +70,6 @@ make ci-full
 
 - Prefer workspace-level CI profiles for the full agent + eBPF path.
 - When making agent lifecycle changes, validate the worker with the scheduler and networking services together.
-- For host and VM smoke validation of NAT64/DNS64, use [docs/nat64-dns64-smoke-checklist.md](/home/apardo/Work/mikrom.rust/docs/nat64-dns64-smoke-checklist.md).
+- For host and VM smoke validation of NAT64/DNS64, use [docs/nat64-dns64-smoke-checklist.md](../docs/nat64-dns64-smoke-checklist.md).
 - The ignored NATS integration test is included in `make ci-external-tests` via `MIKROM_RUN_NATS_TESTS=1`; Ceph coverage stays manual through `MIKROM_RUN_CEPH_TESTS=1` when a cluster is available.
 - The Ceph integration test is also wired into the `ceph-tests` workflow job for a self-hosted runner labeled `ceph` that has `/etc/ceph/ceph.conf`, `/etc/ceph/admin.secret`, and cluster access.

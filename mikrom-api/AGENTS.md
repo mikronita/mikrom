@@ -2,7 +2,7 @@
 
 ## Scope
 
-`mikrom-api` is the control plane API for Mikrom. It handles auth, application lifecycle, deployment orchestration, secrets, and Neon-backed database provisioning.
+`mikrom-api` is the control plane API for Mikrom. It handles auth, application lifecycle, deployment orchestration, secrets, Personal Access Tokens (PATs), user notification preferences, and Neon-backed database provisioning (including branching, backups, and snapshots).
 Database records also persist the PostgreSQL major version and expose it in the user-facing database responses.
 
 ## Current Runtime
