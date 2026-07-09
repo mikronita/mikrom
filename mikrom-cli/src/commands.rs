@@ -289,6 +289,43 @@ pub enum DeploymentCommands {
         #[arg(long, short, help = "Skip confirmation prompt")]
         yes: bool,
     },
+    /// List snapshots for a deployment VM
+    Snapshots {
+        #[arg(long, short, help = "Name of the application")]
+        app: String,
+        #[arg(long, short, help = "The unique Job ID for this instance")]
+        job_id: String,
+    },
+    /// Create a new snapshot of a deployment VM
+    #[command(name = "snapshot-create")]
+    SnapshotCreate {
+        #[arg(long, short, help = "Name of the application")]
+        app: String,
+        #[arg(long, short, help = "The unique Job ID for this instance")]
+        job_id: String,
+        #[arg(help = "Snapshot name")]
+        name: String,
+    },
+    /// Restore a deployment VM to a specific snapshot
+    #[command(name = "snapshot-restore")]
+    SnapshotRestore {
+        #[arg(long, short, help = "Name of the application")]
+        app: String,
+        #[arg(long, short, help = "The unique Job ID for this instance")]
+        job_id: String,
+        #[arg(help = "Snapshot name to restore")]
+        snapshot: String,
+    },
+    /// Delete a deployment VM snapshot
+    #[command(name = "snapshot-delete")]
+    SnapshotDelete {
+        #[arg(long, short, help = "Name of the application")]
+        app: String,
+        #[arg(long, short, help = "The unique Job ID for this instance")]
+        job_id: String,
+        #[arg(help = "Snapshot name to delete")]
+        snapshot: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]

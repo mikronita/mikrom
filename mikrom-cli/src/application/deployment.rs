@@ -18,7 +18,127 @@ pub async fn handle(
         DeploymentCommands::Delete { app, job_id, yes } => {
             delete(ctx, &app, &job_id, yes, output).await
         },
+        DeploymentCommands::Snapshots { app, job_id } => {
+            snapshots(ctx, &app, &job_id, output).await
+        },
+        DeploymentCommands::SnapshotCreate { app, job_id, name } => {
+            snapshot_create(ctx, &app, &job_id, &name, output).await
+        },
+        DeploymentCommands::SnapshotRestore { app, job_id, snapshot } => {
+            snapshot_restore(ctx, &app, &job_id, &snapshot, output).await
+        },
+        DeploymentCommands::SnapshotDelete { app, job_id, snapshot } => {
+            snapshot_delete(ctx, &app, &job_id, &snapshot, output).await
+        },
     }
+}
+
+async fn snapshots(ctx: &CliContext, app: &str, job_id: &str, output: OutputFormat) -> CliResult<()> {
+    let resp = ctx.client.list_vm_snapshots(app, job_id).await?;
+    if output == OutputFormat::Json {
+        print_json(&resp);
+        return Ok(());
+    }
+
+    if !resp.success {
+        ui::error(&resp.message);
+    }
+
+    if resp.snapshots.is_empty() {
+        ui::info("No VM snapshots found.");
+    } else {
+        let rows = resp.snapshots
+            .iter()
+            .map(|s| {
+                let size_str = if s.size_bytes >= 1024 * 1024 * 1024 {
+                    format!("{:.1} GiB", s.size_bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+                } else if s.size_bytes >= 1024 * 1024 {
+                    format!("{:.1} MiB", s.size_bytes as f64 / (1024.0 * 1024.0))
+                } else {
+                    format!("{:.1} KiB", s.size_bytes as f64 / 1024.0)
+                };
+                let datetime = chrono::DateTime::from_timestamp(s.created_at, 0)
+                    .map(|dt| dt.to_rfc3339())
+                    .unwrap_or_else(|| s.created_at.to_string());
+                vec![
+                    s.id.clone(),
+                    s.name.clone(),
+                    ui::status_label(&s.vm_status),
+                    size_str,
+                    datetime,
+                ]
+            })
+            .collect::<Vec<_>>();
+        ui::table(
+            &format!("📸 VM Snapshots for {}/{}", app, job_id),
+            &["ID", "Name", "VM Status", "Size", "Created At"],
+            &rows,
+        );
+    }
+    Ok(())
+}
+
+async fn snapshot_create(ctx: &CliContext, app: &str, job_id: &str, name: &str, output: OutputFormat) -> CliResult<()> {
+    if output == OutputFormat::Table {
+        ui::step(
+            ui::WAIT,
+            &format!("{} Creating VM snapshot '{}' for {}/{}...", ui::ROCKET, name, app, job_id),
+        );
+    }
+    let resp = ctx.client.create_vm_snapshot(app, job_id, name).await?;
+    if output == OutputFormat::Json {
+        print_json(&resp);
+        return Ok(());
+    }
+
+    if resp.success {
+        ui::success(&format!("VM Snapshot '{}' created successfully: {}", name, resp.message));
+    } else {
+        ui::error(&format!("Failed to create VM snapshot: {}", resp.message));
+    }
+    Ok(())
+}
+
+async fn snapshot_restore(ctx: &CliContext, app: &str, job_id: &str, snapshot: &str, output: OutputFormat) -> CliResult<()> {
+    if output == OutputFormat::Table {
+        ui::step(
+            ui::WAIT,
+            &format!("{} Restoring VM {}/{} to snapshot '{}'...", ui::RESUME, app, job_id, snapshot),
+        );
+    }
+    let resp = ctx.client.restore_vm_snapshot(app, job_id, snapshot).await?;
+    if output == OutputFormat::Json {
+        print_json(&resp);
+        return Ok(());
+    }
+
+    if resp.success {
+        ui::success(&format!("VM restored to snapshot '{}' successfully: {}", snapshot, resp.message));
+    } else {
+        ui::error(&format!("Failed to restore VM snapshot: {}", resp.message));
+    }
+    Ok(())
+}
+
+async fn snapshot_delete(ctx: &CliContext, app: &str, job_id: &str, snapshot: &str, output: OutputFormat) -> CliResult<()> {
+    if output == OutputFormat::Table {
+        ui::step(
+            ui::WAIT,
+            &format!("{} Deleting VM snapshot '{}' for {}/{}...", ui::ERROR, snapshot, app, job_id),
+        );
+    }
+    let resp = ctx.client.delete_vm_snapshot(app, job_id, snapshot).await?;
+    if output == OutputFormat::Json {
+        print_json(&resp);
+        return Ok(());
+    }
+
+    if resp.success {
+        ui::success(&format!("VM Snapshot '{}' deleted successfully: {}", snapshot, resp.message));
+    } else {
+        ui::error(&format!("Failed to delete VM snapshot: {}", resp.message));
+    }
+    Ok(())
 }
 
 async fn list(ctx: &CliContext, output: OutputFormat) -> CliResult<()> {
@@ -389,6 +509,131 @@ mod tests {
             DeploymentCommands::Status {
                 app: "svc".to_string(),
                 job_id: "job-1".to_string(),
+            },
+            OutputFormat::Json,
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn snapshots_calls_api_and_lists_snapshots() {
+        let mut mock = MockApiClient::new();
+        mock.expect_list_vm_snapshots()
+            .with(
+                mockall::predicate::eq("svc"),
+                mockall::predicate::eq("job-1"),
+            )
+            .times(1)
+            .returning(|_, _| {
+                Ok(crate::domain::models::DeploymentSnapshotListResponse {
+                    success: true,
+                    message: "ok".to_string(),
+                    snapshots: vec![crate::domain::models::DeploymentSnapshot {
+                        id: "snap-123".to_string(),
+                        name: "my-snap".to_string(),
+                        created_at: 1717891200,
+                        size_bytes: 1024 * 1024,
+                        vm_status: "running".to_string(),
+                    }],
+                })
+            });
+        let ctx = test_ctx(mock);
+        let result = handle(
+            &ctx,
+            DeploymentCommands::Snapshots {
+                app: "svc".to_string(),
+                job_id: "job-1".to_string(),
+            },
+            OutputFormat::Json,
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn snapshot_create_calls_api_and_returns_ok() {
+        let mut mock = MockApiClient::new();
+        mock.expect_create_vm_snapshot()
+            .with(
+                mockall::predicate::eq("svc"),
+                mockall::predicate::eq("job-1"),
+                mockall::predicate::eq("my-snap"),
+            )
+            .times(1)
+            .returning(|_, _, _| {
+                Ok(crate::domain::models::DeploymentSnapshotActionResponse {
+                    success: true,
+                    message: "created".to_string(),
+                })
+            });
+        let ctx = test_ctx(mock);
+        let result = handle(
+            &ctx,
+            DeploymentCommands::SnapshotCreate {
+                app: "svc".to_string(),
+                job_id: "job-1".to_string(),
+                name: "my-snap".to_string(),
+            },
+            OutputFormat::Json,
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn snapshot_restore_calls_api_and_returns_ok() {
+        let mut mock = MockApiClient::new();
+        mock.expect_restore_vm_snapshot()
+            .with(
+                mockall::predicate::eq("svc"),
+                mockall::predicate::eq("job-1"),
+                mockall::predicate::eq("my-snap"),
+            )
+            .times(1)
+            .returning(|_, _, _| {
+                Ok(crate::domain::models::DeploymentSnapshotActionResponse {
+                    success: true,
+                    message: "restored".to_string(),
+                })
+            });
+        let ctx = test_ctx(mock);
+        let result = handle(
+            &ctx,
+            DeploymentCommands::SnapshotRestore {
+                app: "svc".to_string(),
+                job_id: "job-1".to_string(),
+                snapshot: "my-snap".to_string(),
+            },
+            OutputFormat::Json,
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn snapshot_delete_calls_api_and_returns_ok() {
+        let mut mock = MockApiClient::new();
+        mock.expect_delete_vm_snapshot()
+            .with(
+                mockall::predicate::eq("svc"),
+                mockall::predicate::eq("job-1"),
+                mockall::predicate::eq("my-snap"),
+            )
+            .times(1)
+            .returning(|_, _, _| {
+                Ok(crate::domain::models::DeploymentSnapshotActionResponse {
+                    success: true,
+                    message: "deleted".to_string(),
+                })
+            });
+        let ctx = test_ctx(mock);
+        let result = handle(
+            &ctx,
+            DeploymentCommands::SnapshotDelete {
+                app: "svc".to_string(),
+                job_id: "job-1".to_string(),
+                snapshot: "my-snap".to_string(),
             },
             OutputFormat::Json,
         )

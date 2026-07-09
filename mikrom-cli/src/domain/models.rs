@@ -320,3 +320,30 @@ pub struct NotificationListResponse {
     pub has_more: bool,
     pub next_offset: i64,
 }
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DeploymentSnapshot {
+    pub id: String,
+    pub name: String,
+    pub created_at: i64,
+    pub size_bytes: u64,
+    pub vm_status: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DeploymentSnapshotListResponse {
+    pub success: bool,
+    pub message: String,
+    pub snapshots: Vec<DeploymentSnapshot>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DeploymentSnapshotActionResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct SnapshotNameRequest {
+    pub snapshot_name: String,
+}

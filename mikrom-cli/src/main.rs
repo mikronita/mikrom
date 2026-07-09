@@ -845,4 +845,55 @@ mod tests {
             _ => panic!("expected notification read-all"),
         }
     }
+
+    #[test]
+    fn test_cli_deployment_snapshots_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "deployment", "snapshots", "--app", "my-app", "--job-id", "job-1"]).unwrap();
+        match cli.command {
+            Commands::Deployment(DeploymentCommands::Snapshots { app, job_id }) => {
+                assert_eq!(app, "my-app");
+                assert_eq!(job_id, "job-1");
+            },
+            _ => panic!("expected deployment snapshots"),
+        }
+    }
+
+    #[test]
+    fn test_cli_deployment_snapshot_create_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "deployment", "snapshot-create", "--app", "my-app", "--job-id", "job-1", "my-snap"]).unwrap();
+        match cli.command {
+            Commands::Deployment(DeploymentCommands::SnapshotCreate { app, job_id, name }) => {
+                assert_eq!(app, "my-app");
+                assert_eq!(job_id, "job-1");
+                assert_eq!(name, "my-snap");
+            },
+            _ => panic!("expected deployment snapshot-create"),
+        }
+    }
+
+    #[test]
+    fn test_cli_deployment_snapshot_restore_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "deployment", "snapshot-restore", "--app", "my-app", "--job-id", "job-1", "my-snap"]).unwrap();
+        match cli.command {
+            Commands::Deployment(DeploymentCommands::SnapshotRestore { app, job_id, snapshot }) => {
+                assert_eq!(app, "my-app");
+                assert_eq!(job_id, "job-1");
+                assert_eq!(snapshot, "my-snap");
+            },
+            _ => panic!("expected deployment snapshot-restore"),
+        }
+    }
+
+    #[test]
+    fn test_cli_deployment_snapshot_delete_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "deployment", "snapshot-delete", "--app", "my-app", "--job-id", "job-1", "my-snap"]).unwrap();
+        match cli.command {
+            Commands::Deployment(DeploymentCommands::SnapshotDelete { app, job_id, snapshot }) => {
+                assert_eq!(app, "my-app");
+                assert_eq!(job_id, "job-1");
+                assert_eq!(snapshot, "my-snap");
+            },
+            _ => panic!("expected deployment snapshot-delete"),
+        }
+    }
 }

@@ -711,6 +711,42 @@ impl ApiClient for ReqwestApiClient {
         )
         .await
     }
+
+    async fn list_vm_snapshots(&self, app_name: &str, job_id: &str) -> CliResult<DeploymentSnapshotListResponse> {
+        self.request(
+            reqwest::Method::GET,
+            &format!("apps/{}/deployments/{}/snapshots", app_name, job_id),
+            None::<()>,
+        )
+        .await
+    }
+
+    async fn create_vm_snapshot(&self, app_name: &str, job_id: &str, name: &str) -> CliResult<DeploymentSnapshotActionResponse> {
+        self.request(
+            reqwest::Method::POST,
+            &format!("apps/{}/deployments/{}/snapshot", app_name, job_id),
+            Some(SnapshotNameRequest { snapshot_name: name.to_string() }),
+        )
+        .await
+    }
+
+    async fn restore_vm_snapshot(&self, app_name: &str, job_id: &str, snapshot_name: &str) -> CliResult<DeploymentSnapshotActionResponse> {
+        self.request(
+            reqwest::Method::POST,
+            &format!("apps/{}/deployments/{}/snapshot/{}/restore", app_name, job_id, snapshot_name),
+            None::<()>,
+        )
+        .await
+    }
+
+    async fn delete_vm_snapshot(&self, app_name: &str, job_id: &str, snapshot_name: &str) -> CliResult<DeploymentSnapshotActionResponse> {
+        self.request(
+            reqwest::Method::DELETE,
+            &format!("apps/{}/deployments/{}/snapshot/{}", app_name, job_id, snapshot_name),
+            None::<()>,
+        )
+        .await
+    }
 }
 
 #[cfg(test)]
