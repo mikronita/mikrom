@@ -181,7 +181,13 @@ async fn login_rejects_invalid_password() {
     });
 
     let state = build_state(Arc::new(user_repo), Arc::new(MockTenantRepository::new()));
-    let result = AuthService::login(&state, email.to_string(), "wrong-password".to_string(), None).await;
+    let result = AuthService::login(
+        &state,
+        email.to_string(),
+        "wrong-password".to_string(),
+        None,
+    )
+    .await;
 
     assert!(result.is_err());
 }

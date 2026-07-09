@@ -323,31 +323,51 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
             created_at: chrono::Utc::now(),
         })
     });
-    plan_tier_repo.expect_assign_to_tenant().returning(|_, _| Ok(()));
+    plan_tier_repo
+        .expect_assign_to_tenant()
+        .returning(|_, _| Ok(()));
 
     let mut tenant_usage_repo = mikrom_api::domain::MockTenantUsageRepository::new();
-    tenant_usage_repo.expect_get_or_create().returning(|tenant_id| {
-        Ok(mikrom_api::domain::plan_tier::TenantUsage {
-            tenant_id,
-            apps_count: 0,
-            databases_count: 0,
-            volumes_count: 0,
-            vcpus_total: 0,
-            memory_mb_total: 0,
-            storage_gb_total: 0,
-            deployments_count: 0,
-            bandwidth_gb_billed: 0,
-            updated_at: chrono::Utc::now(),
-        })
-    });
-    tenant_usage_repo.expect_increment_apps().returning(|_, _, _, _, _| Ok(()));
-    tenant_usage_repo.expect_decrement_apps().returning(|_, _, _, _| Ok(()));
-    tenant_usage_repo.expect_increment_databases().returning(|_, _| Ok(()));
-    tenant_usage_repo.expect_decrement_databases().returning(|_| Ok(()));
-    tenant_usage_repo.expect_increment_volumes().returning(|_, _, _| Ok(()));
-    tenant_usage_repo.expect_decrement_volumes().returning(|_, _| Ok(()));
-    tenant_usage_repo.expect_increment_deployments().returning(|_, _| Ok(()));
-    tenant_usage_repo.expect_decrement_deployments().returning(|_| Ok(()));
+    tenant_usage_repo
+        .expect_get_or_create()
+        .returning(|tenant_id| {
+            Ok(mikrom_api::domain::plan_tier::TenantUsage {
+                tenant_id,
+                apps_count: 0,
+                databases_count: 0,
+                volumes_count: 0,
+                vcpus_total: 0,
+                memory_mb_total: 0,
+                storage_gb_total: 0,
+                deployments_count: 0,
+                bandwidth_gb_billed: 0,
+                updated_at: chrono::Utc::now(),
+            })
+        });
+    tenant_usage_repo
+        .expect_increment_apps()
+        .returning(|_, _, _, _, _| Ok(()));
+    tenant_usage_repo
+        .expect_decrement_apps()
+        .returning(|_, _, _, _| Ok(()));
+    tenant_usage_repo
+        .expect_increment_databases()
+        .returning(|_, _| Ok(()));
+    tenant_usage_repo
+        .expect_decrement_databases()
+        .returning(|_| Ok(()));
+    tenant_usage_repo
+        .expect_increment_volumes()
+        .returning(|_, _, _| Ok(()));
+    tenant_usage_repo
+        .expect_decrement_volumes()
+        .returning(|_, _| Ok(()));
+    tenant_usage_repo
+        .expect_increment_deployments()
+        .returning(|_, _| Ok(()));
+    tenant_usage_repo
+        .expect_decrement_deployments()
+        .returning(|_| Ok(()));
 
     api_state.ctx.plan_tier_repo = Arc::new(plan_tier_repo);
     api_state.ctx.tenant_usage_repo = Arc::new(tenant_usage_repo);

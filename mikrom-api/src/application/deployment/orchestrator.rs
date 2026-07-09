@@ -343,7 +343,9 @@ mod tests {
             app_repo: app_repo.clone(),
             github_repo: github_repo.clone(),
             volume_repo: volume_repo.clone(),
-            personal_access_token_repo: Arc::new(crate::domain::MockPersonalAccessTokenRepository::new()),
+            personal_access_token_repo: Arc::new(
+                crate::domain::MockPersonalAccessTokenRepository::new(),
+            ),
             scheduler: scheduler.clone(),
             nats: nats.clone(),
             db: db.clone(),
@@ -533,7 +535,9 @@ mod tests {
             app_repo: app_repo.clone(),
             github_repo: github_repo.clone(),
             volume_repo: volume_repo.clone(),
-            personal_access_token_repo: Arc::new(crate::domain::MockPersonalAccessTokenRepository::new()),
+            personal_access_token_repo: Arc::new(
+                crate::domain::MockPersonalAccessTokenRepository::new(),
+            ),
             scheduler: scheduler.clone(),
             nats: nats.clone(),
             db: db.clone(),

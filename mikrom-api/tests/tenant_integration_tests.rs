@@ -468,24 +468,28 @@ async fn create_project_creates_tenant_for_user() {
             created_at: chrono::Utc::now(),
         })
     });
-    plan_tier_repo.expect_assign_to_tenant().returning(|_, _| Ok(()));
+    plan_tier_repo
+        .expect_assign_to_tenant()
+        .returning(|_, _| Ok(()));
     state.ctx.plan_tier_repo = Arc::new(plan_tier_repo);
 
     let mut tenant_usage_repo = mikrom_api::domain::MockTenantUsageRepository::new();
-    tenant_usage_repo.expect_get_or_create().returning(|tenant_id| {
-        Ok(mikrom_api::domain::plan_tier::TenantUsage {
-            tenant_id,
-            apps_count: 0,
-            databases_count: 0,
-            volumes_count: 0,
-            vcpus_total: 0,
-            memory_mb_total: 0,
-            storage_gb_total: 0,
-            deployments_count: 0,
-            bandwidth_gb_billed: 0,
-            updated_at: chrono::Utc::now(),
-        })
-    });
+    tenant_usage_repo
+        .expect_get_or_create()
+        .returning(|tenant_id| {
+            Ok(mikrom_api::domain::plan_tier::TenantUsage {
+                tenant_id,
+                apps_count: 0,
+                databases_count: 0,
+                volumes_count: 0,
+                vcpus_total: 0,
+                memory_mb_total: 0,
+                storage_gb_total: 0,
+                deployments_count: 0,
+                bandwidth_gb_billed: 0,
+                updated_at: chrono::Utc::now(),
+            })
+        });
     state.ctx.tenant_usage_repo = Arc::new(tenant_usage_repo);
 
     let created_tenant = Tenant {

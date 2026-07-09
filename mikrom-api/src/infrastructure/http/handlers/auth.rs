@@ -312,7 +312,9 @@ pub async fn create_personal_access_token(
     Json(payload): Json<CreateTokenRequest>,
 ) -> ApiResult<(StatusCode, Json<CreatedTokenResponse>)> {
     if payload.name.trim().is_empty() {
-        return Err(crate::error::ApiError::BadRequest("Token name cannot be empty".to_string()));
+        return Err(crate::error::ApiError::BadRequest(
+            "Token name cannot be empty".to_string(),
+        ));
     }
 
     let user_id = uuid::Uuid::parse_str(&auth.user_id)
@@ -320,7 +322,7 @@ pub async fn create_personal_access_token(
 
     use rand::distr::{Alphanumeric, SampleString};
     use rand::rng;
-    
+
     let token_secret = Alphanumeric.sample_string(&mut rng(), 32);
     let full_token = format!("mikrom_pat_{}", token_secret);
 
@@ -388,7 +390,9 @@ pub async fn revoke_personal_access_token(
         .map_err(|e| crate::error::ApiError::Internal(e.to_string()))?;
 
     if !deleted {
-        return Err(crate::error::ApiError::NotFound("Token not found".to_string()));
+        return Err(crate::error::ApiError::NotFound(
+            "Token not found".to_string(),
+        ));
     }
 
     Ok(StatusCode::NO_CONTENT)
@@ -1190,13 +1194,13 @@ mod tests {
         let user_id = Uuid::new_v4();
 
         let mut mock_pat_repo = crate::domain::MockPersonalAccessTokenRepository::new();
-        
+
         let test_token = crate::domain::personal_access_token::PersonalAccessToken {
             id: Uuid::new_v4(),
             user_id,
             name: "test-token".to_string(),
             token_last_four: "abcd".to_string(),
-            created_at: Utc::now(),
+            created_at: chrono::Utc::now(),
             last_used_at: None,
         };
         let _create_token_details = test_token.clone();
@@ -1208,7 +1212,7 @@ mod tests {
                     user_id,
                     name,
                     token_last_four: "abcd".to_string(),
-                    created_at: Utc::now(),
+                    created_at: chrono::Utc::now(),
                     last_used_at: None,
                 })
             });
@@ -1216,16 +1220,14 @@ mod tests {
         let list_tokens = vec![test_token.clone()];
         mock_pat_repo
             .expect_list_by_user()
-            .returning(move |_| {
-                Ok(list_tokens.clone())
-            });
+            .returning(move |_| Ok(list_tokens.clone()));
 
-        mock_pat_repo
-            .expect_delete()
-            .returning(|_, _| Ok(true));
+        mock_pat_repo.expect_delete().returning(|_, _| Ok(true));
 
-        let mut ctx = crate::application::ApiContext::default();
-        ctx.personal_access_token_repo = Arc::new(mock_pat_repo);
+        let ctx = crate::application::ApiContext {
+            personal_access_token_repo: Arc::new(mock_pat_repo),
+            ..Default::default()
+        };
 
         let state = AppState {
             ctx: ctx.clone(),
@@ -1269,7 +1271,9 @@ mod tests {
         let payload = CreateTokenRequest {
             name: "test-token".to_string(),
         };
-        let response = __create_personal_access_token_impl(auth.clone(), State(state.clone()), Json(payload)).await;
+        let response =
+            __create_personal_access_token_impl(auth.clone(), State(state.clone()), Json(payload))
+                .await;
         assert!(response.is_ok());
         let (status, Json(created)) = response.unwrap();
         assert_eq!(status, StatusCode::CREATED);
@@ -1282,7 +1286,12 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].name, "test-token");
 
-        let response = __revoke_personal_access_token_impl(auth, State(state), axum::extract::Path(test_token.id)).await;
+        let response = __revoke_personal_access_token_impl(
+            auth,
+            State(state),
+            axum::extract::Path(test_token.id),
+        )
+        .await;
         assert!(response.is_ok());
         assert_eq!(response.unwrap(), StatusCode::NO_CONTENT);
     }

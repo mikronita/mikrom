@@ -1,7 +1,7 @@
-use crate::domain::error::DomainResult;
-use crate::domain::personal_access_token::{PersonalAccessToken, PersonalAccessTokenRepository};
 use crate::domain::User;
 use crate::domain::UserRole;
+use crate::domain::error::DomainResult;
+use crate::domain::personal_access_token::{PersonalAccessToken, PersonalAccessTokenRepository};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{FromRow, PgPool};
@@ -102,7 +102,10 @@ impl PersonalAccessTokenRepository for PostgresPersonalAccessTokenRepository {
         Ok(db_tokens.into_iter().map(Into::into).collect())
     }
 
-    async fn find_by_hash(&self, token_hash: &str) -> DomainResult<Option<(PersonalAccessToken, User)>> {
+    async fn find_by_hash(
+        &self,
+        token_hash: &str,
+    ) -> DomainResult<Option<(PersonalAccessToken, User)>> {
         let result = sqlx::query_as::<_, JoinedPatRow>(
             "SELECT 
                 t.id AS t_id, t.user_id AS t_user_id, t.name AS t_name, t.token_last_four AS t_token_last_four, t.created_at AS t_created_at, t.last_used_at AS t_last_used_at,
@@ -148,11 +151,12 @@ impl PersonalAccessTokenRepository for PostgresPersonalAccessTokenRepository {
     }
 
     async fn delete(&self, id: Uuid, user_id: Uuid) -> DomainResult<bool> {
-        let result = sqlx::query("DELETE FROM personal_access_tokens WHERE id = $1 AND user_id = $2")
-            .bind(id)
-            .bind(user_id)
-            .execute(&self.pool)
-            .await?;
+        let result =
+            sqlx::query("DELETE FROM personal_access_tokens WHERE id = $1 AND user_id = $2")
+                .bind(id)
+                .bind(user_id)
+                .execute(&self.pool)
+                .await?;
 
         Ok(result.rows_affected() > 0)
     }
