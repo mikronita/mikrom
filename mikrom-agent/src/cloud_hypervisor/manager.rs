@@ -694,16 +694,29 @@ impl CloudHypervisorManager {
             let vm_id = *entry.key();
             let proc_lock = entry.value();
             let mut proc = proc_lock.write().await;
+            let has_exited = if let Some(child) = proc.child.as_mut() {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        tracing::info!(vm_id = %vm_id, status = ?status, "Detected Cloud Hypervisor process exit via GC");
+                        true
+                    },
+                    Ok(None) => false,
+                    Err(e) => {
+                        tracing::error!(vm_id = %vm_id, error = %e, "Error checking Cloud Hypervisor process status");
+                        false
+                    },
+                }
+            } else {
+                if !self.is_pid_alive(proc.pid) {
+                    tracing::info!(vm_id = %vm_id, pid = proc.pid, "Detected recovered Cloud Hypervisor process exit via GC");
+                    true
+                } else {
+                    false
+                }
+            };
 
-            match proc.child.try_wait() {
-                Ok(Some(status)) => {
-                    tracing::info!(vm_id = %vm_id, status = ?status, "Detected Cloud Hypervisor process exit via GC");
-                    exited.push(vm_id);
-                },
-                Ok(None) => {},
-                Err(e) => {
-                    tracing::error!(vm_id = %vm_id, error = %e, "Error checking Cloud Hypervisor process status");
-                },
+            if has_exited {
+                exited.push(vm_id);
             }
         }
 
@@ -747,27 +760,27 @@ impl CloudHypervisorManager {
             .join("vms")
             .join(vm_id.to_string())
             .join("state.json");
+        let tmp_path = path.with_extension("json.tmp");
         let payload = serde_json::to_vec_pretty(&state).map_err(|e| {
             HypervisorError::ProcessError(format!("Failed to serialize VM state: {e}"))
         })?;
 
-        tokio::fs::write(path, payload)
-            .await
-            .map_err(|e| HypervisorError::ProcessError(format!("Failed to write VM state: {e}")))?;
+        tokio::fs::write(&tmp_path, payload).await.map_err(|e| {
+            HypervisorError::ProcessError(format!("Failed to write temporary VM state: {e}"))
+        })?;
+
+        tokio::fs::rename(&tmp_path, &path).await.map_err(|e| {
+            HypervisorError::ProcessError(format!("Failed to rename VM state: {e}"))
+        })?;
 
         Ok(())
     }
 
     fn is_pid_alive(&self, pid: u32) -> bool {
-        let mut system = sysinfo::System::new();
-        system.refresh_processes(
-            sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from(pid as usize)]),
-            true,
-        );
-        if let Some(process) = system.process(sysinfo::Pid::from(pid as usize)) {
-            process.name().to_string_lossy().contains("cloud-hypervis")
-        } else {
-            false
+        let status_path = format!("/proc/{pid}/status");
+        match std::fs::read_to_string(status_path) {
+            Ok(status) => !status.lines().any(|line| line.starts_with("State:\tZ")),
+            Err(_) => false,
         }
     }
 }
@@ -858,12 +871,20 @@ impl VmHypervisor for CloudHypervisorManager {
             // 2. Wait for exit
             let mut exited = false;
             for _ in 0..50 {
-                match proc.child.try_wait() {
-                    Ok(Some(_)) => {
+                if let Some(child) = proc.child.as_mut() {
+                    match child.try_wait() {
+                        Ok(Some(_)) => {
+                            exited = true;
+                            break;
+                        },
+                        _ => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
+                    }
+                } else {
+                    if !self.is_pid_alive(proc.pid) {
                         exited = true;
                         break;
-                    },
-                    _ => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 }
             }
 
@@ -1114,19 +1135,12 @@ impl VmHypervisor for CloudHypervisorManager {
             if self.is_pid_alive(state.pid) {
                 tracing::info!(vm_id = %state.vm_id, pid = %state.pid, "Reconciling Cloud Hypervisor VM");
 
-                // Reconstruct the process handle
-                // We use a command that exits immediately just to satisfy the tokio::process::Child requirement
-                let mut cmd = tokio::process::Command::new("true");
-                let child = cmd.spawn().map_err(|e| {
-                    tracing::error!("Failed to spawn stub process for VM recovery: {e}");
-                    HypervisorError::ProcessError(format!("Failed to spawn stub process: {e}"))
-                })?;
-
+                // Reconstruct the process handle without stub process spawning
                 let proc = CloudHypervisorProcess {
                     vm_id: state.vm_id.to_string(),
                     socket_path: self.get_vm_paths(&state.vm_id).0,
                     pid: state.pid,
-                    child,
+                    child: None,
                     sidecars: Vec::new(),
                     tap_ifindex: state.tap_ifindex,
                 };

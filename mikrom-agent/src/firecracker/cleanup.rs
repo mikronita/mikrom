@@ -130,7 +130,7 @@ impl crate::firecracker::FirecrackerManager {
         }
 
         // Step 4: Persist state and spawn restarts.
-        let _ = self.persist_runtime_state().await;
+        let _ = self.persist_runtime_state_to_disk().await;
 
         for (vid, aid, img, cfg) in restarts {
             let self_clone = self.clone();
