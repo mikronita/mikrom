@@ -24,16 +24,25 @@ pub async fn handle(
         DeploymentCommands::SnapshotCreate { app, job_id, name } => {
             snapshot_create(ctx, &app, &job_id, &name, output).await
         },
-        DeploymentCommands::SnapshotRestore { app, job_id, snapshot } => {
-            snapshot_restore(ctx, &app, &job_id, &snapshot, output).await
-        },
-        DeploymentCommands::SnapshotDelete { app, job_id, snapshot } => {
-            snapshot_delete(ctx, &app, &job_id, &snapshot, output).await
-        },
+        DeploymentCommands::SnapshotRestore {
+            app,
+            job_id,
+            snapshot,
+        } => snapshot_restore(ctx, &app, &job_id, &snapshot, output).await,
+        DeploymentCommands::SnapshotDelete {
+            app,
+            job_id,
+            snapshot,
+        } => snapshot_delete(ctx, &app, &job_id, &snapshot, output).await,
     }
 }
 
-async fn snapshots(ctx: &CliContext, app: &str, job_id: &str, output: OutputFormat) -> CliResult<()> {
+async fn snapshots(
+    ctx: &CliContext,
+    app: &str,
+    job_id: &str,
+    output: OutputFormat,
+) -> CliResult<()> {
     let resp = ctx.client.list_vm_snapshots(app, job_id).await?;
     if output == OutputFormat::Json {
         print_json(&resp);
@@ -47,11 +56,15 @@ async fn snapshots(ctx: &CliContext, app: &str, job_id: &str, output: OutputForm
     if resp.snapshots.is_empty() {
         ui::info("No VM snapshots found.");
     } else {
-        let rows = resp.snapshots
+        let rows = resp
+            .snapshots
             .iter()
             .map(|s| {
                 let size_str = if s.size_bytes >= 1024 * 1024 * 1024 {
-                    format!("{:.1} GiB", s.size_bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+                    format!(
+                        "{:.1} GiB",
+                        s.size_bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+                    )
                 } else if s.size_bytes >= 1024 * 1024 {
                     format!("{:.1} MiB", s.size_bytes as f64 / (1024.0 * 1024.0))
                 } else {
@@ -78,11 +91,23 @@ async fn snapshots(ctx: &CliContext, app: &str, job_id: &str, output: OutputForm
     Ok(())
 }
 
-async fn snapshot_create(ctx: &CliContext, app: &str, job_id: &str, name: &str, output: OutputFormat) -> CliResult<()> {
+async fn snapshot_create(
+    ctx: &CliContext,
+    app: &str,
+    job_id: &str,
+    name: &str,
+    output: OutputFormat,
+) -> CliResult<()> {
     if output == OutputFormat::Table {
         ui::step(
             ui::WAIT,
-            &format!("{} Creating VM snapshot '{}' for {}/{}...", ui::ROCKET, name, app, job_id),
+            &format!(
+                "{} Creating VM snapshot '{}' for {}/{}...",
+                ui::ROCKET,
+                name,
+                app,
+                job_id
+            ),
         );
     }
     let resp = ctx.client.create_vm_snapshot(app, job_id, name).await?;
@@ -92,39 +117,72 @@ async fn snapshot_create(ctx: &CliContext, app: &str, job_id: &str, name: &str, 
     }
 
     if resp.success {
-        ui::success(&format!("VM Snapshot '{}' created successfully: {}", name, resp.message));
+        ui::success(&format!(
+            "VM Snapshot '{}' created successfully: {}",
+            name, resp.message
+        ));
     } else {
         ui::error(&format!("Failed to create VM snapshot: {}", resp.message));
     }
     Ok(())
 }
 
-async fn snapshot_restore(ctx: &CliContext, app: &str, job_id: &str, snapshot: &str, output: OutputFormat) -> CliResult<()> {
+async fn snapshot_restore(
+    ctx: &CliContext,
+    app: &str,
+    job_id: &str,
+    snapshot: &str,
+    output: OutputFormat,
+) -> CliResult<()> {
     if output == OutputFormat::Table {
         ui::step(
             ui::WAIT,
-            &format!("{} Restoring VM {}/{} to snapshot '{}'...", ui::RESUME, app, job_id, snapshot),
+            &format!(
+                "{} Restoring VM {}/{} to snapshot '{}'...",
+                ui::RESUME,
+                app,
+                job_id,
+                snapshot
+            ),
         );
     }
-    let resp = ctx.client.restore_vm_snapshot(app, job_id, snapshot).await?;
+    let resp = ctx
+        .client
+        .restore_vm_snapshot(app, job_id, snapshot)
+        .await?;
     if output == OutputFormat::Json {
         print_json(&resp);
         return Ok(());
     }
 
     if resp.success {
-        ui::success(&format!("VM restored to snapshot '{}' successfully: {}", snapshot, resp.message));
+        ui::success(&format!(
+            "VM restored to snapshot '{}' successfully: {}",
+            snapshot, resp.message
+        ));
     } else {
         ui::error(&format!("Failed to restore VM snapshot: {}", resp.message));
     }
     Ok(())
 }
 
-async fn snapshot_delete(ctx: &CliContext, app: &str, job_id: &str, snapshot: &str, output: OutputFormat) -> CliResult<()> {
+async fn snapshot_delete(
+    ctx: &CliContext,
+    app: &str,
+    job_id: &str,
+    snapshot: &str,
+    output: OutputFormat,
+) -> CliResult<()> {
     if output == OutputFormat::Table {
         ui::step(
             ui::WAIT,
-            &format!("{} Deleting VM snapshot '{}' for {}/{}...", ui::ERROR, snapshot, app, job_id),
+            &format!(
+                "{} Deleting VM snapshot '{}' for {}/{}...",
+                ui::ERROR,
+                snapshot,
+                app,
+                job_id
+            ),
         );
     }
     let resp = ctx.client.delete_vm_snapshot(app, job_id, snapshot).await?;
@@ -134,7 +192,10 @@ async fn snapshot_delete(ctx: &CliContext, app: &str, job_id: &str, snapshot: &s
     }
 
     if resp.success {
-        ui::success(&format!("VM Snapshot '{}' deleted successfully: {}", snapshot, resp.message));
+        ui::success(&format!(
+            "VM Snapshot '{}' deleted successfully: {}",
+            snapshot, resp.message
+        ));
     } else {
         ui::error(&format!("Failed to delete VM snapshot: {}", resp.message));
     }

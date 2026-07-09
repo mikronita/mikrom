@@ -1,5 +1,5 @@
 use crate::application::context::CliContext;
-use crate::commands::{PatCommands, OutputFormat};
+use crate::commands::{OutputFormat, PatCommands};
 use crate::domain::error::CliResult;
 use crate::infrastructure::ui;
 
@@ -18,7 +18,10 @@ pub async fn handle(ctx: &CliContext, cmd: PatCommands, output: OutputFormat) ->
                             token.name.clone(),
                             format!("...{}", token.token_last_four),
                             token.created_at.clone(),
-                            token.last_used_at.clone().unwrap_or_else(|| "Never".to_string()),
+                            token
+                                .last_used_at
+                                .clone()
+                                .unwrap_or_else(|| "Never".to_string()),
                         ]
                     })
                     .collect::<Vec<_>>();
@@ -39,10 +42,18 @@ pub async fn handle(ctx: &CliContext, cmd: PatCommands, output: OutputFormat) ->
             if output == OutputFormat::Json {
                 println!("{}", serde_json::to_string_pretty(&resp)?);
             } else {
-                ui::success(&format!("Token '{}' created successfully!", resp.details.name));
+                ui::success(&format!(
+                    "Token '{}' created successfully!",
+                    resp.details.name
+                ));
                 ui::step(ui::INFO, &ui::bold_cyan("Your new Personal Access Token:"));
                 println!("  {}", resp.token);
-                ui::step(ui::WAIT, &ui::yellow_label("WARNING: Make sure to copy this token now. You won't be able to see it again!"));
+                ui::step(
+                    ui::WAIT,
+                    &ui::yellow_label(
+                        "WARNING: Make sure to copy this token now. You won't be able to see it again!",
+                    ),
+                );
             }
         },
         PatCommands::Revoke { id, yes } => {
@@ -67,7 +78,7 @@ mod tests {
     use super::*;
     use crate::application::ports::MockApiClient;
     use crate::config::Config;
-    use crate::domain::models::{PersonalAccessToken, CreatedTokenResponse};
+    use crate::domain::models::{CreatedTokenResponse, PersonalAccessToken};
     use std::sync::Arc;
 
     fn test_ctx(mock: MockApiClient) -> CliContext {

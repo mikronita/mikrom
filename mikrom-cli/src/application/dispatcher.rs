@@ -23,7 +23,9 @@ pub async fn dispatch(
         Commands::Volume(vol_cmd) => crate::application::volume::handle(ctx, vol_cmd, output).await,
         Commands::Db(db_cmd) => crate::application::database::handle(ctx, db_cmd, output).await,
         Commands::Pat(pat_cmd) => crate::application::pat::handle(ctx, pat_cmd, output).await,
-        Commands::Notification(notif_cmd) => crate::application::notification::handle(ctx, notif_cmd, output).await,
+        Commands::Notification(notif_cmd) => {
+            crate::application::notification::handle(ctx, notif_cmd, output).await
+        },
         Commands::Project(project_cmd) => {
             crate::application::project::handle(ctx, project_cmd, cfg, output).await
         },

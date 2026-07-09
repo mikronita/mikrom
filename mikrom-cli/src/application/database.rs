@@ -152,9 +152,15 @@ pub async fn handle(ctx: &CliContext, cmd: DbCommands, output: OutputFormat) -> 
         },
         DbCommands::Branches { id } => {
             let dbs = ctx.client.list_databases().await?;
-            let db = dbs.into_iter().find(|d| d.name == id || d.id == id).ok_or_else(|| {
-                crate::domain::error::CliError::Validation(format!("Database '{}' not found", id))
-            })?;
+            let db = dbs
+                .into_iter()
+                .find(|d| d.name == id || d.id == id)
+                .ok_or_else(|| {
+                    crate::domain::error::CliError::Validation(format!(
+                        "Database '{}' not found",
+                        id
+                    ))
+                })?;
             let branches = ctx.client.list_database_branches(&db.id).await?;
             if output == OutputFormat::Json {
                 println!("{}", serde_json::to_string_pretty(&branches)?);
@@ -168,34 +174,77 @@ pub async fn handle(ctx: &CliContext, cmd: DbCommands, output: OutputFormat) -> 
                             b.neon_tenant_id.clone().unwrap_or_default(),
                             b.neon_timeline_id.clone().unwrap_or_default(),
                             ui::status_label(&b.status),
-                            if b.is_current { "Yes".to_string() } else { "No".to_string() },
+                            if b.is_current {
+                                "Yes".to_string()
+                            } else {
+                                "No".to_string()
+                            },
                         ]
                     })
                     .collect::<Vec<_>>();
                 ui::table(
                     &format!("🌿 Branches for database {}", db.name),
-                    &["Database", "Branch", "Neon Tenant ID", "Neon Timeline ID", "Status", "Current"],
+                    &[
+                        "Database",
+                        "Branch",
+                        "Neon Tenant ID",
+                        "Neon Timeline ID",
+                        "Status",
+                        "Current",
+                    ],
                     &rows,
                 );
             }
         },
         DbCommands::Backup { id } => {
             let dbs = ctx.client.list_databases().await?;
-            let db = dbs.into_iter().find(|d| d.name == id || d.id == id).ok_or_else(|| {
-                crate::domain::error::CliError::Validation(format!("Database '{}' not found", id))
-            })?;
+            let db = dbs
+                .into_iter()
+                .find(|d| d.name == id || d.id == id)
+                .ok_or_else(|| {
+                    crate::domain::error::CliError::Validation(format!(
+                        "Database '{}' not found",
+                        id
+                    ))
+                })?;
             let backup = ctx.client.get_database_backups(&db.id).await?;
             if output == OutputFormat::Json {
                 println!("{}", serde_json::to_string_pretty(&backup)?);
             } else {
-                ui::step(ui::INFO, &ui::bold_cyan(&format!("Backup Details for Database: {}", db.name)));
+                ui::step(
+                    ui::INFO,
+                    &ui::bold_cyan(&format!("Backup Details for Database: {}", db.name)),
+                );
                 ui::label_value(ui::INFO, "Database ID", &backup.database_id);
                 ui::label_value(ui::SYS, "Backup Strategy", &backup.backup_strategy);
                 ui::label_value(ui::WATCH, "Recovery Mode", &backup.recovery_mode);
-                ui::label_value(ui::SYS, "Retention Valid", &if backup.retention_valid { "Yes".to_string() } else { "No".to_string() });
-                ui::label_value(ui::PORT, "Neon Tenant ID", &backup.neon_tenant_id.unwrap_or_default());
-                ui::label_value(ui::PORT, "Neon Timeline ID", &backup.neon_timeline_id.unwrap_or_default());
-                ui::label_value(ui::SYS, "Tenant Gen", &backup.tenant_gen.map(|g| g.to_string()).unwrap_or_else(|| "1".to_string()));
+                ui::label_value(
+                    ui::SYS,
+                    "Retention Valid",
+                    &if backup.retention_valid {
+                        "Yes".to_string()
+                    } else {
+                        "No".to_string()
+                    },
+                );
+                ui::label_value(
+                    ui::PORT,
+                    "Neon Tenant ID",
+                    &backup.neon_tenant_id.unwrap_or_default(),
+                );
+                ui::label_value(
+                    ui::PORT,
+                    "Neon Timeline ID",
+                    &backup.neon_timeline_id.unwrap_or_default(),
+                );
+                ui::label_value(
+                    ui::SYS,
+                    "Tenant Gen",
+                    &backup
+                        .tenant_gen
+                        .map(|g| g.to_string())
+                        .unwrap_or_else(|| "1".to_string()),
+                );
                 ui::label_value(ui::WATCH, "Status", &ui::status_label(&backup.status));
                 ui::label_value(ui::CLOCK, "Created At", &backup.created_at);
                 ui::label_value(ui::CLOCK, "Updated At", &backup.updated_at);
@@ -203,9 +252,15 @@ pub async fn handle(ctx: &CliContext, cmd: DbCommands, output: OutputFormat) -> 
         },
         DbCommands::Snapshots { id } => {
             let dbs = ctx.client.list_databases().await?;
-            let db = dbs.into_iter().find(|d| d.name == id || d.id == id).ok_or_else(|| {
-                crate::domain::error::CliError::Validation(format!("Database '{}' not found", id))
-            })?;
+            let db = dbs
+                .into_iter()
+                .find(|d| d.name == id || d.id == id)
+                .ok_or_else(|| {
+                    crate::domain::error::CliError::Validation(format!(
+                        "Database '{}' not found",
+                        id
+                    ))
+                })?;
             let resp = ctx.client.list_database_snapshots(&db.id).await?;
             if output == OutputFormat::Json {
                 println!("{}", serde_json::to_string_pretty(&resp)?);
@@ -213,11 +268,15 @@ pub async fn handle(ctx: &CliContext, cmd: DbCommands, output: OutputFormat) -> 
                 if !resp.success {
                     ui::error(&resp.message);
                 }
-                let rows = resp.snapshots
+                let rows = resp
+                    .snapshots
                     .iter()
                     .map(|s| {
                         let size_str = if s.size_bytes >= 1024 * 1024 * 1024 {
-                            format!("{:.1} GiB", s.size_bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+                            format!(
+                                "{:.1} GiB",
+                                s.size_bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+                            )
                         } else if s.size_bytes >= 1024 * 1024 {
                             format!("{:.1} MiB", s.size_bytes as f64 / (1024.0 * 1024.0))
                         } else {
@@ -244,9 +303,15 @@ pub async fn handle(ctx: &CliContext, cmd: DbCommands, output: OutputFormat) -> 
         },
         DbCommands::SnapshotCreate { id, name } => {
             let dbs = ctx.client.list_databases().await?;
-            let db = dbs.into_iter().find(|d| d.name == id || d.id == id).ok_or_else(|| {
-                crate::domain::error::CliError::Validation(format!("Database '{}' not found", id))
-            })?;
+            let db = dbs
+                .into_iter()
+                .find(|d| d.name == id || d.id == id)
+                .ok_or_else(|| {
+                    crate::domain::error::CliError::Validation(format!(
+                        "Database '{}' not found",
+                        id
+                    ))
+                })?;
             let resp = ctx.client.create_database_snapshot(&db.id, &name).await?;
             if resp.success {
                 ui::success(&format!("Snapshot '{}' created: {}", name, resp.message));
@@ -256,24 +321,48 @@ pub async fn handle(ctx: &CliContext, cmd: DbCommands, output: OutputFormat) -> 
         },
         DbCommands::SnapshotRestore { id, snapshot } => {
             let dbs = ctx.client.list_databases().await?;
-            let db = dbs.into_iter().find(|d| d.name == id || d.id == id).ok_or_else(|| {
-                crate::domain::error::CliError::Validation(format!("Database '{}' not found", id))
-            })?;
-            let resp = ctx.client.restore_database_snapshot(&db.id, &snapshot).await?;
+            let db = dbs
+                .into_iter()
+                .find(|d| d.name == id || d.id == id)
+                .ok_or_else(|| {
+                    crate::domain::error::CliError::Validation(format!(
+                        "Database '{}' not found",
+                        id
+                    ))
+                })?;
+            let resp = ctx
+                .client
+                .restore_database_snapshot(&db.id, &snapshot)
+                .await?;
             if resp.success {
-                ui::success(&format!("Database restored to snapshot '{}': {}", snapshot, resp.message));
+                ui::success(&format!(
+                    "Database restored to snapshot '{}': {}",
+                    snapshot, resp.message
+                ));
             } else {
                 ui::error(&format!("Failed to restore snapshot: {}", resp.message));
             }
         },
         DbCommands::SnapshotDelete { id, snapshot } => {
             let dbs = ctx.client.list_databases().await?;
-            let db = dbs.into_iter().find(|d| d.name == id || d.id == id).ok_or_else(|| {
-                crate::domain::error::CliError::Validation(format!("Database '{}' not found", id))
-            })?;
-            let resp = ctx.client.delete_database_snapshot(&db.id, &snapshot).await?;
+            let db = dbs
+                .into_iter()
+                .find(|d| d.name == id || d.id == id)
+                .ok_or_else(|| {
+                    crate::domain::error::CliError::Validation(format!(
+                        "Database '{}' not found",
+                        id
+                    ))
+                })?;
+            let resp = ctx
+                .client
+                .delete_database_snapshot(&db.id, &snapshot)
+                .await?;
             if resp.success {
-                ui::success(&format!("Snapshot '{}' deleted: {}", snapshot, resp.message));
+                ui::success(&format!(
+                    "Snapshot '{}' deleted: {}",
+                    snapshot, resp.message
+                ));
             } else {
                 ui::error(&format!("Failed to delete snapshot: {}", resp.message));
             }

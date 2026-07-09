@@ -101,8 +101,8 @@ async fn main() -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use mikrom_cli::commands::{
-        AppCommands, AuthCommands, ConfigCommands, DbCommands, DeploymentCommands, OutputFormat,
-        SystemCommands, VolumeSnapshotCommands, PatCommands, NotificationCommands,
+        AppCommands, AuthCommands, ConfigCommands, DbCommands, DeploymentCommands,
+        NotificationCommands, OutputFormat, PatCommands, SystemCommands, VolumeSnapshotCommands,
     };
 
     #[test]
@@ -747,7 +747,8 @@ mod tests {
 
     #[test]
     fn test_cli_db_snapshot_create_parses() {
-        let cli = Cli::try_parse_from(["mikrom", "db", "snapshot-create", "db-1", "my-snap"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["mikrom", "db", "snapshot-create", "db-1", "my-snap"]).unwrap();
         match cli.command {
             Commands::Db(DbCommands::SnapshotCreate { id, name }) => {
                 assert_eq!(id, "db-1");
@@ -759,7 +760,8 @@ mod tests {
 
     #[test]
     fn test_cli_db_snapshot_restore_parses() {
-        let cli = Cli::try_parse_from(["mikrom", "db", "snapshot-restore", "db-1", "my-snap"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["mikrom", "db", "snapshot-restore", "db-1", "my-snap"]).unwrap();
         match cli.command {
             Commands::Db(DbCommands::SnapshotRestore { id, snapshot }) => {
                 assert_eq!(id, "db-1");
@@ -771,7 +773,8 @@ mod tests {
 
     #[test]
     fn test_cli_db_snapshot_delete_parses() {
-        let cli = Cli::try_parse_from(["mikrom", "db", "snapshot-delete", "db-1", "my-snap"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["mikrom", "db", "snapshot-delete", "db-1", "my-snap"]).unwrap();
         match cli.command {
             Commands::Db(DbCommands::SnapshotDelete { id, snapshot }) => {
                 assert_eq!(id, "db-1");
@@ -815,9 +818,21 @@ mod tests {
 
     #[test]
     fn test_cli_notification_list_parses() {
-        let cli = Cli::try_parse_from(["mikrom", "notification", "list", "--unread-only", "--limit", "10"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "mikrom",
+            "notification",
+            "list",
+            "--unread-only",
+            "--limit",
+            "10",
+        ])
+        .unwrap();
         match cli.command {
-            Commands::Notification(NotificationCommands::List { unread_only, limit, offset }) => {
+            Commands::Notification(NotificationCommands::List {
+                unread_only,
+                limit,
+                offset,
+            }) => {
                 assert!(unread_only);
                 assert_eq!(limit, Some(10));
                 assert_eq!(offset, None);
@@ -848,7 +863,16 @@ mod tests {
 
     #[test]
     fn test_cli_deployment_snapshots_parses() {
-        let cli = Cli::try_parse_from(["mikrom", "deployment", "snapshots", "--app", "my-app", "--job-id", "job-1"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "mikrom",
+            "deployment",
+            "snapshots",
+            "--app",
+            "my-app",
+            "--job-id",
+            "job-1",
+        ])
+        .unwrap();
         match cli.command {
             Commands::Deployment(DeploymentCommands::Snapshots { app, job_id }) => {
                 assert_eq!(app, "my-app");
@@ -860,7 +884,17 @@ mod tests {
 
     #[test]
     fn test_cli_deployment_snapshot_create_parses() {
-        let cli = Cli::try_parse_from(["mikrom", "deployment", "snapshot-create", "--app", "my-app", "--job-id", "job-1", "my-snap"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "mikrom",
+            "deployment",
+            "snapshot-create",
+            "--app",
+            "my-app",
+            "--job-id",
+            "job-1",
+            "my-snap",
+        ])
+        .unwrap();
         match cli.command {
             Commands::Deployment(DeploymentCommands::SnapshotCreate { app, job_id, name }) => {
                 assert_eq!(app, "my-app");
@@ -873,9 +907,23 @@ mod tests {
 
     #[test]
     fn test_cli_deployment_snapshot_restore_parses() {
-        let cli = Cli::try_parse_from(["mikrom", "deployment", "snapshot-restore", "--app", "my-app", "--job-id", "job-1", "my-snap"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "mikrom",
+            "deployment",
+            "snapshot-restore",
+            "--app",
+            "my-app",
+            "--job-id",
+            "job-1",
+            "my-snap",
+        ])
+        .unwrap();
         match cli.command {
-            Commands::Deployment(DeploymentCommands::SnapshotRestore { app, job_id, snapshot }) => {
+            Commands::Deployment(DeploymentCommands::SnapshotRestore {
+                app,
+                job_id,
+                snapshot,
+            }) => {
                 assert_eq!(app, "my-app");
                 assert_eq!(job_id, "job-1");
                 assert_eq!(snapshot, "my-snap");
@@ -886,9 +934,23 @@ mod tests {
 
     #[test]
     fn test_cli_deployment_snapshot_delete_parses() {
-        let cli = Cli::try_parse_from(["mikrom", "deployment", "snapshot-delete", "--app", "my-app", "--job-id", "job-1", "my-snap"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "mikrom",
+            "deployment",
+            "snapshot-delete",
+            "--app",
+            "my-app",
+            "--job-id",
+            "job-1",
+            "my-snap",
+        ])
+        .unwrap();
         match cli.command {
-            Commands::Deployment(DeploymentCommands::SnapshotDelete { app, job_id, snapshot }) => {
+            Commands::Deployment(DeploymentCommands::SnapshotDelete {
+                app,
+                job_id,
+                snapshot,
+            }) => {
                 assert_eq!(app, "my-app");
                 assert_eq!(job_id, "job-1");
                 assert_eq!(snapshot, "my-snap");

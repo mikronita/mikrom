@@ -3,27 +3,49 @@ use crate::commands::{NotificationCommands, OutputFormat};
 use crate::domain::error::CliResult;
 use crate::infrastructure::ui;
 
-pub async fn handle(ctx: &CliContext, cmd: NotificationCommands, output: OutputFormat) -> CliResult<()> {
+pub async fn handle(
+    ctx: &CliContext,
+    cmd: NotificationCommands,
+    output: OutputFormat,
+) -> CliResult<()> {
     match cmd {
-        NotificationCommands::List { unread_only, limit, offset } => {
-            let resp = ctx.client.list_user_notifications(unread_only, limit, offset).await?;
+        NotificationCommands::List {
+            unread_only,
+            limit,
+            offset,
+        } => {
+            let resp = ctx
+                .client
+                .list_user_notifications(unread_only, limit, offset)
+                .await?;
             if output == OutputFormat::Json {
                 println!("{}", serde_json::to_string_pretty(&resp)?);
             } else {
                 if resp.unread_count > 0 {
-                    ui::step(ui::WARN, &ui::bold_cyan(&format!("You have {} unread notification(s)!", resp.unread_count)));
+                    ui::step(
+                        ui::WARN,
+                        &ui::bold_cyan(&format!(
+                            "You have {} unread notification(s)!",
+                            resp.unread_count
+                        )),
+                    );
                 } else {
                     ui::step(ui::SUCCESS, "No unread notifications.");
                 }
 
-                let rows = resp.notifications
+                let rows = resp
+                    .notifications
                     .iter()
                     .map(|n| {
                         vec![
                             n.id.clone(),
                             n.title.clone(),
                             n.body.clone(),
-                            if n.is_read { "Read".to_string() } else { "UNREAD".to_string() },
+                            if n.is_read {
+                                "Read".to_string()
+                            } else {
+                                "UNREAD".to_string()
+                            },
                             n.created_at.clone(),
                         ]
                     })

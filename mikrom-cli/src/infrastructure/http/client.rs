@@ -581,7 +581,10 @@ impl ApiClient for ReqwestApiClient {
         .await
     }
 
-    async fn list_database_snapshots(&self, db_id: &str) -> CliResult<DatabaseSnapshotListResponse> {
+    async fn list_database_snapshots(
+        &self,
+        db_id: &str,
+    ) -> CliResult<DatabaseSnapshotListResponse> {
         self.request(
             reqwest::Method::GET,
             &format!("databases/{}/backups/snapshots", db_id),
@@ -590,25 +593,41 @@ impl ApiClient for ReqwestApiClient {
         .await
     }
 
-    async fn create_database_snapshot(&self, db_id: &str, name: &str) -> CliResult<DatabaseSnapshotActionResponse> {
+    async fn create_database_snapshot(
+        &self,
+        db_id: &str,
+        name: &str,
+    ) -> CliResult<DatabaseSnapshotActionResponse> {
         self.request(
             reqwest::Method::POST,
             &format!("databases/{}/backups/snapshots", db_id),
-            Some(DatabaseSnapshotNameRequest { name: name.to_string() }),
+            Some(DatabaseSnapshotNameRequest {
+                name: name.to_string(),
+            }),
         )
         .await
     }
 
-    async fn restore_database_snapshot(&self, db_id: &str, snapshot_name: &str) -> CliResult<DatabaseSnapshotActionResponse> {
+    async fn restore_database_snapshot(
+        &self,
+        db_id: &str,
+        snapshot_name: &str,
+    ) -> CliResult<DatabaseSnapshotActionResponse> {
         self.request(
             reqwest::Method::POST,
             &format!("databases/{}/backups/restore", db_id),
-            Some(DatabaseRestoreSnapshotRequest { snapshot_name: snapshot_name.to_string() }),
+            Some(DatabaseRestoreSnapshotRequest {
+                snapshot_name: snapshot_name.to_string(),
+            }),
         )
         .await
     }
 
-    async fn delete_database_snapshot(&self, db_id: &str, snapshot_name: &str) -> CliResult<DatabaseSnapshotActionResponse> {
+    async fn delete_database_snapshot(
+        &self,
+        db_id: &str,
+        snapshot_name: &str,
+    ) -> CliResult<DatabaseSnapshotActionResponse> {
         self.request(
             reqwest::Method::DELETE,
             &format!("databases/{}/backups/snapshots/{}", db_id, snapshot_name),
@@ -632,19 +651,17 @@ impl ApiClient for ReqwestApiClient {
     }
 
     async fn list_personal_access_tokens(&self) -> CliResult<Vec<PersonalAccessToken>> {
-        self.request(
-            reqwest::Method::GET,
-            "auth/tokens",
-            None::<()>,
-        )
-        .await
+        self.request(reqwest::Method::GET, "auth/tokens", None::<()>)
+            .await
     }
 
     async fn create_personal_access_token(&self, name: &str) -> CliResult<CreatedTokenResponse> {
         self.request(
             reqwest::Method::POST,
             "auth/tokens",
-            Some(CreateTokenRequest { name: name.to_string() }),
+            Some(CreateTokenRequest {
+                name: name.to_string(),
+            }),
         )
         .await
     }
@@ -686,12 +703,7 @@ impl ApiClient for ReqwestApiClient {
             format!("notifications?{}", q_str)
         };
 
-        self.request(
-            reqwest::Method::GET,
-            &path,
-            None::<()>,
-        )
-        .await
+        self.request(reqwest::Method::GET, &path, None::<()>).await
     }
 
     async fn mark_user_notification_read(&self, notification_id: &str) -> CliResult<()> {
@@ -712,7 +724,11 @@ impl ApiClient for ReqwestApiClient {
         .await
     }
 
-    async fn list_vm_snapshots(&self, app_name: &str, job_id: &str) -> CliResult<DeploymentSnapshotListResponse> {
+    async fn list_vm_snapshots(
+        &self,
+        app_name: &str,
+        job_id: &str,
+    ) -> CliResult<DeploymentSnapshotListResponse> {
         self.request(
             reqwest::Method::GET,
             &format!("apps/{}/deployments/{}/snapshots", app_name, job_id),
@@ -721,28 +737,51 @@ impl ApiClient for ReqwestApiClient {
         .await
     }
 
-    async fn create_vm_snapshot(&self, app_name: &str, job_id: &str, name: &str) -> CliResult<DeploymentSnapshotActionResponse> {
+    async fn create_vm_snapshot(
+        &self,
+        app_name: &str,
+        job_id: &str,
+        name: &str,
+    ) -> CliResult<DeploymentSnapshotActionResponse> {
         self.request(
             reqwest::Method::POST,
             &format!("apps/{}/deployments/{}/snapshot", app_name, job_id),
-            Some(SnapshotNameRequest { snapshot_name: name.to_string() }),
+            Some(SnapshotNameRequest {
+                snapshot_name: name.to_string(),
+            }),
         )
         .await
     }
 
-    async fn restore_vm_snapshot(&self, app_name: &str, job_id: &str, snapshot_name: &str) -> CliResult<DeploymentSnapshotActionResponse> {
+    async fn restore_vm_snapshot(
+        &self,
+        app_name: &str,
+        job_id: &str,
+        snapshot_name: &str,
+    ) -> CliResult<DeploymentSnapshotActionResponse> {
         self.request(
             reqwest::Method::POST,
-            &format!("apps/{}/deployments/{}/snapshot/{}/restore", app_name, job_id, snapshot_name),
+            &format!(
+                "apps/{}/deployments/{}/snapshot/{}/restore",
+                app_name, job_id, snapshot_name
+            ),
             None::<()>,
         )
         .await
     }
 
-    async fn delete_vm_snapshot(&self, app_name: &str, job_id: &str, snapshot_name: &str) -> CliResult<DeploymentSnapshotActionResponse> {
+    async fn delete_vm_snapshot(
+        &self,
+        app_name: &str,
+        job_id: &str,
+        snapshot_name: &str,
+    ) -> CliResult<DeploymentSnapshotActionResponse> {
         self.request(
             reqwest::Method::DELETE,
-            &format!("apps/{}/deployments/{}/snapshot/{}", app_name, job_id, snapshot_name),
+            &format!(
+                "apps/{}/deployments/{}/snapshot/{}",
+                app_name, job_id, snapshot_name
+            ),
             None::<()>,
         )
         .await
