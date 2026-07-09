@@ -83,4 +83,22 @@ pub trait ApiClient: Send + Sync {
 
     async fn list_projects(&self) -> CliResult<Vec<ProjectInfo>>;
     async fn create_project(&self, name: &str) -> CliResult<ProjectInfo>;
+
+    async fn list_personal_access_tokens(&self) -> CliResult<Vec<PersonalAccessToken>>;
+    async fn create_personal_access_token(&self, name: &str) -> CliResult<CreatedTokenResponse>;
+    async fn revoke_personal_access_token(&self, token_id: &str) -> CliResult<()>;
+
+    async fn list_user_notifications(
+        &self,
+        unread_only: bool,
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> CliResult<NotificationListResponse>;
+    async fn mark_user_notification_read(&self, notification_id: &str) -> CliResult<()>;
+    async fn mark_all_user_notifications_read(&self) -> CliResult<()>;
+
+    async fn list_vm_snapshots(&self, app_name: &str, job_id: &str) -> CliResult<DeploymentSnapshotListResponse>;
+    async fn create_vm_snapshot(&self, app_name: &str, job_id: &str, name: &str) -> CliResult<DeploymentSnapshotActionResponse>;
+    async fn restore_vm_snapshot(&self, app_name: &str, job_id: &str, snapshot_name: &str) -> CliResult<DeploymentSnapshotActionResponse>;
+    async fn delete_vm_snapshot(&self, app_name: &str, job_id: &str, snapshot_name: &str) -> CliResult<DeploymentSnapshotActionResponse>;
 }
