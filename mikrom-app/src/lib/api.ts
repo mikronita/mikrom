@@ -55,6 +55,8 @@ export interface UserProfile {
   avatar_url: string | null;
   vpc_ipv6_prefix: string | null;
   totp_enabled?: boolean;
+  email_notifications?: boolean;
+  marketing_emails?: boolean;
 }
 
 export interface ProjectInfo {
@@ -161,8 +163,10 @@ export interface DatabaseSnapshotActionResponse {
 }
 
 export interface UpdateProfileRequest {
-  first_name: string | null;
-  last_name: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  email_notifications?: boolean | null;
+  marketing_emails?: boolean | null;
 }
 
 export async function uploadUserAvatar(token: string, file: File) {

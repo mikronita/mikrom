@@ -60,6 +60,8 @@ struct JoinedPatRow {
     u_totp_secret: Option<String>,
     u_totp_enabled: bool,
     u_deleted_at: Option<DateTime<Utc>>,
+    u_email_notifications: bool,
+    u_marketing_emails: bool,
 }
 
 #[async_trait]
@@ -109,7 +111,8 @@ impl PersonalAccessTokenRepository for PostgresPersonalAccessTokenRepository {
         let result = sqlx::query_as::<_, JoinedPatRow>(
             "SELECT 
                 t.id AS t_id, t.user_id AS t_user_id, t.name AS t_name, t.token_last_four AS t_token_last_four, t.created_at AS t_created_at, t.last_used_at AS t_last_used_at,
-                u.id AS u_id, u.email AS u_email, u.password_hash AS u_password_hash, u.role AS u_role, u.first_name AS u_first_name, u.last_name AS u_last_name, u.avatar_url AS u_avatar_url, u.vpc_ipv6_prefix AS u_vpc_ipv6_prefix, u.totp_secret AS u_totp_secret, u.totp_enabled AS u_totp_enabled, u.deleted_at AS u_deleted_at
+                u.id AS u_id, u.email AS u_email, u.password_hash AS u_password_hash, u.role AS u_role, u.first_name AS u_first_name, u.last_name AS u_last_name, u.avatar_url AS u_avatar_url, u.vpc_ipv6_prefix AS u_vpc_ipv6_prefix, u.totp_secret AS u_totp_secret, u.totp_enabled AS u_totp_enabled, u.deleted_at AS u_deleted_at,
+                u.email_notifications AS u_email_notifications, u.marketing_emails AS u_marketing_emails
              FROM personal_access_tokens t
              JOIN users u ON t.user_id = u.id
              WHERE t.token_hash = $1 AND u.deleted_at IS NULL"
@@ -143,6 +146,8 @@ impl PersonalAccessTokenRepository for PostgresPersonalAccessTokenRepository {
                 totp_secret: row.u_totp_secret,
                 totp_enabled: row.u_totp_enabled,
                 deleted_at: row.u_deleted_at,
+                email_notifications: row.u_email_notifications,
+                marketing_emails: row.u_marketing_emails,
             };
             Ok(Some((token, user)))
         } else {

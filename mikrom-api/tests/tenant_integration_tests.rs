@@ -35,6 +35,8 @@ fn build_state(tenant_id: Uuid, owner_user_id: Uuid) -> AppState {
             totp_secret: None,
             totp_enabled: false,
             deleted_at: None,
+            email_notifications: true,
+            marketing_emails: false,
         }))
     });
 

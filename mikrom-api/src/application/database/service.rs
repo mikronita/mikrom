@@ -1239,6 +1239,8 @@ mod tests {
                     totp_secret: None,
                     totp_enabled: false,
                     deleted_at: None,
+                    email_notifications: true,
+                    marketing_emails: false,
                 }))
             });
 
@@ -1366,6 +1368,8 @@ mod tests {
                     totp_secret: None,
                     totp_enabled: false,
                     deleted_at: None,
+                    email_notifications: true,
+                    marketing_emails: false,
                 }))
             });
 
@@ -1771,6 +1775,8 @@ mod tests {
                     totp_secret: None,
                     totp_enabled: false,
                     deleted_at: None,
+                    email_notifications: true,
+                    marketing_emails: false,
                 }))
             });
 
@@ -1859,6 +1865,8 @@ mod tests {
                     totp_secret: None,
                     totp_enabled: false,
                     deleted_at: None,
+                    email_notifications: true,
+                    marketing_emails: false,
                 }))
             });
 

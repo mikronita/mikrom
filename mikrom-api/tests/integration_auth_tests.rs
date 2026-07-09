@@ -64,6 +64,8 @@ fn user(id: Uuid, email: &str) -> User {
         totp_secret: None,
         totp_enabled: false,
         deleted_at: None,
+        email_notifications: true,
+        marketing_emails: false,
     }
 }
 
@@ -146,6 +148,8 @@ async fn login_returns_token_for_valid_credentials() {
             totp_secret: None,
             totp_enabled: false,
             deleted_at: None,
+            email_notifications: true,
+            marketing_emails: false,
         }))
     });
 
@@ -177,6 +181,8 @@ async fn login_rejects_invalid_password() {
             totp_secret: None,
             totp_enabled: false,
             deleted_at: None,
+            email_notifications: true,
+            marketing_emails: false,
         }))
     });
 
@@ -198,13 +204,14 @@ async fn update_profile_emits_workspace_event() {
     let email = "profile@example.com";
 
     let mut user_repo = MockUserRepository::new();
-    user_repo
-        .expect_update_profile()
-        .returning(move |id, first_name, last_name, avatar_url| {
+    user_repo.expect_update_profile().returning(
+        move |id, first_name, last_name, avatar_url, email_notifications, marketing_emails| {
             assert_eq!(id, user_id);
             assert_eq!(first_name.as_deref(), Some("Ada"));
             assert_eq!(last_name.as_deref(), Some("Lovelace"));
             assert!(avatar_url.is_none());
+            assert!(email_notifications.is_none());
+            assert!(marketing_emails.is_none());
             Ok(User {
                 id,
                 email: email.to_string(),
@@ -217,8 +224,11 @@ async fn update_profile_emits_workspace_event() {
                 totp_secret: None,
                 totp_enabled: false,
                 deleted_at: None,
+                email_notifications: true,
+                marketing_emails: false,
             })
-        });
+        },
+    );
     user_repo.expect_find_by_id().returning(move |id| {
         Ok(Some(User {
             id,
@@ -232,6 +242,8 @@ async fn update_profile_emits_workspace_event() {
             totp_secret: None,
             totp_enabled: false,
             deleted_at: None,
+            email_notifications: true,
+            marketing_emails: false,
         }))
     });
 
@@ -247,6 +259,8 @@ async fn update_profile_emits_workspace_event() {
         &user_id.to_string(),
         Some("Ada".to_string()),
         Some("Lovelace".to_string()),
+        None,
+        None,
         None,
     )
     .await
@@ -280,6 +294,8 @@ async fn change_password_success() {
             totp_secret: None,
             totp_enabled: false,
             deleted_at: None,
+            email_notifications: true,
+            marketing_emails: false,
         }))
     });
     user_repo.expect_update_password().returning(|_, _| Ok(()));
@@ -315,6 +331,8 @@ async fn change_password_rejects_wrong_current() {
             totp_secret: None,
             totp_enabled: false,
             deleted_at: None,
+            email_notifications: true,
+            marketing_emails: false,
         }))
     });
 
@@ -348,6 +366,8 @@ async fn setup_totp_returns_secret_and_url() {
             totp_secret: None,
             totp_enabled: false,
             deleted_at: None,
+            email_notifications: true,
+            marketing_emails: false,
         }))
     });
     user_repo
@@ -390,6 +410,8 @@ async fn setup_totp_fails_when_already_enabled() {
             totp_secret: Some("secret".to_string()),
             totp_enabled: true,
             deleted_at: None,
+            email_notifications: true,
+            marketing_emails: false,
         }))
     });
 
@@ -433,6 +455,8 @@ async fn verify_totp_succeeds_with_valid_code() {
             totp_secret: Some(secret_encoded.clone()),
             totp_enabled: false,
             deleted_at: None,
+            email_notifications: true,
+            marketing_emails: false,
         }))
     });
     user_repo.expect_enable_totp().returning(|_| Ok(()));
@@ -475,6 +499,8 @@ async fn verify_totp_fails_with_invalid_code() {
             totp_secret: Some(secret_encoded.clone()),
             totp_enabled: false,
             deleted_at: None,
+            email_notifications: true,
+            marketing_emails: false,
         }))
     });
 
@@ -502,6 +528,8 @@ async fn verify_totp_fails_when_no_secret_stored() {
             totp_secret: None,
             totp_enabled: false,
             deleted_at: None,
+            email_notifications: true,
+            marketing_emails: false,
         }))
     });
 

@@ -20,6 +20,8 @@ pub struct UpdateProfileParams {
     pub first_name: Option<String>,
     pub last_name: Option<String>,
     pub avatar_url: Option<String>,
+    pub email_notifications: Option<bool>,
+    pub marketing_emails: Option<bool>,
 }
 
 pub struct AuthResult {
@@ -215,6 +217,8 @@ impl AuthService {
                 params.first_name,
                 params.last_name,
                 params.avatar_url,
+                params.email_notifications,
+                params.marketing_emails,
             )
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -239,6 +243,8 @@ impl AuthService {
         first_name: Option<String>,
         last_name: Option<String>,
         avatar_url: Option<String>,
+        email_notifications: Option<bool>,
+        marketing_emails: Option<bool>,
     ) -> ApiResult<User> {
         let user_id = Uuid::parse_str(auth_user_id)
             .map_err(|_| ApiError::Auth("Invalid user ID in token".into()))?;
@@ -250,6 +256,8 @@ impl AuthService {
                 first_name,
                 last_name,
                 avatar_url,
+                email_notifications,
+                marketing_emails,
             },
         )
         .await

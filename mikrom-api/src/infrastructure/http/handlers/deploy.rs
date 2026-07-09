@@ -1161,6 +1161,8 @@ mod tests {
                 totp_secret: None,
                 totp_enabled: false,
                 deleted_at: None,
+                email_notifications: true,
+                marketing_emails: false,
             }))
         });
         state.user_repo = Arc::new(mock_user_repo);
@@ -1268,6 +1270,8 @@ mod tests {
                 totp_secret: None,
                 totp_enabled: false,
                 deleted_at: None,
+                email_notifications: true,
+                marketing_emails: false,
             }))
         });
         state.user_repo = Arc::new(mock_user_repo);

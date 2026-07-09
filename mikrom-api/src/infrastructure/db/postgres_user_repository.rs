@@ -19,8 +19,8 @@ impl PostgresUserRepository {
 #[async_trait]
 impl UserRepository for PostgresUserRepository {
     async fn find_by_email(&self, email: &str) -> DomainResult<Option<User>> {
-        let result = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, bool, Option<DateTime<Utc>>)>(
-            "SELECT id, email, password_hash, role, first_name, last_name, avatar_url, vpc_ipv6_prefix, totp_secret, totp_enabled, deleted_at FROM users WHERE email = $1",
+        let result = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, bool, Option<DateTime<Utc>>, bool, bool)>(
+            "SELECT id, email, password_hash, role, first_name, last_name, avatar_url, vpc_ipv6_prefix, totp_secret, totp_enabled, deleted_at, email_notifications, marketing_emails FROM users WHERE email = $1",
         )
         .bind(email)
         .fetch_optional(&self.pool)
@@ -38,6 +38,8 @@ impl UserRepository for PostgresUserRepository {
             totp_secret,
             totp_enabled,
             deleted_at,
+            email_notifications,
+            marketing_emails,
         )) = result
         {
             let role = match role_str.as_str() {
@@ -56,6 +58,8 @@ impl UserRepository for PostgresUserRepository {
                 totp_secret,
                 totp_enabled,
                 deleted_at,
+                email_notifications,
+                marketing_emails,
             }))
         } else {
             Ok(None)
@@ -65,9 +69,9 @@ impl UserRepository for PostgresUserRepository {
     async fn find_by_id(&self, id: Uuid) -> DomainResult<Option<User>> {
         let result = sqlx::query_as::<
             _,
-            (Uuid, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, bool, Option<DateTime<Utc>>),
+            (Uuid, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, bool, Option<DateTime<Utc>>, bool, bool),
         >(
-            "SELECT id, email, password_hash, role, first_name, last_name, avatar_url, vpc_ipv6_prefix, totp_secret, totp_enabled, deleted_at FROM users WHERE id = $1",
+            "SELECT id, email, password_hash, role, first_name, last_name, avatar_url, vpc_ipv6_prefix, totp_secret, totp_enabled, deleted_at, email_notifications, marketing_emails FROM users WHERE id = $1",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -85,6 +89,8 @@ impl UserRepository for PostgresUserRepository {
             totp_secret,
             totp_enabled,
             deleted_at,
+            email_notifications,
+            marketing_emails,
         )) = result
         {
             let role = match role_str.as_str() {
@@ -103,6 +109,8 @@ impl UserRepository for PostgresUserRepository {
                 totp_secret,
                 totp_enabled,
                 deleted_at,
+                email_notifications,
+                marketing_emails,
             }))
         } else {
             Ok(None)
@@ -147,14 +155,19 @@ impl UserRepository for PostgresUserRepository {
         first_name: Option<String>,
         last_name: Option<String>,
         avatar_url: Option<String>,
+        email_notifications: Option<bool>,
+        marketing_emails: Option<bool>,
     ) -> DomainResult<User> {
-        let result = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, bool, Option<DateTime<Utc>>)>(
-            "UPDATE users SET first_name = COALESCE($1, first_name), last_name = COALESCE($2, last_name), avatar_url = COALESCE($3, avatar_url) \
-             WHERE id = $4 RETURNING id, email, password_hash, role, first_name, last_name, avatar_url, vpc_ipv6_prefix, totp_secret, totp_enabled, deleted_at",
+        let result = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, bool, Option<DateTime<Utc>>, bool, bool)>(
+            "UPDATE users SET first_name = COALESCE($1, first_name), last_name = COALESCE($2, last_name), avatar_url = COALESCE($3, avatar_url), \
+             email_notifications = COALESCE($4, email_notifications), marketing_emails = COALESCE($5, marketing_emails) \
+             WHERE id = $6 RETURNING id, email, password_hash, role, first_name, last_name, avatar_url, vpc_ipv6_prefix, totp_secret, totp_enabled, deleted_at, email_notifications, marketing_emails",
         )
         .bind(first_name)
         .bind(last_name)
         .bind(avatar_url)
+        .bind(email_notifications)
+        .bind(marketing_emails)
         .bind(id)
         .fetch_one(&self.pool)
         .await?;
@@ -171,6 +184,8 @@ impl UserRepository for PostgresUserRepository {
             totp_secret,
             totp_enabled,
             deleted_at,
+            email_notifications,
+            marketing_emails,
         ) = result;
         let role = match role_str.as_str() {
             "admin" => UserRole::Admin,
@@ -189,6 +204,8 @@ impl UserRepository for PostgresUserRepository {
             totp_secret,
             totp_enabled,
             deleted_at,
+            email_notifications,
+            marketing_emails,
         })
     }
 

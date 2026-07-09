@@ -47,6 +47,8 @@ pub struct UserResponse {
     pub avatar_url: Option<String>,
     pub vpc_ipv6_prefix: Option<String>,
     pub totp_enabled: bool,
+    pub email_notifications: bool,
+    pub marketing_emails: bool,
 }
 
 impl From<User> for UserResponse {
@@ -60,6 +62,8 @@ impl From<User> for UserResponse {
             avatar_url: user.avatar_url,
             vpc_ipv6_prefix: user.vpc_ipv6_prefix,
             totp_enabled: user.totp_enabled,
+            email_notifications: user.email_notifications,
+            marketing_emails: user.marketing_emails,
         }
     }
 }
@@ -75,6 +79,8 @@ pub struct LoginRequest {
 pub struct UpdateProfileRequest {
     pub first_name: Option<String>,
     pub last_name: Option<String>,
+    pub email_notifications: Option<bool>,
+    pub marketing_emails: Option<bool>,
 }
 
 fn avatar_storage_dir() -> PathBuf {
@@ -143,6 +149,8 @@ pub async fn update_profile(
         payload.first_name,
         payload.last_name,
         None,
+        payload.email_notifications,
+        payload.marketing_emails,
     )
     .await?;
 
@@ -202,8 +210,16 @@ pub async fn upload_avatar_impl(
         ));
     }
 
-    let user =
-        AuthService::update_profile_by_auth(&state, &auth.user_id, None, None, avatar_url).await?;
+    let user = AuthService::update_profile_by_auth(
+        &state,
+        &auth.user_id,
+        None,
+        None,
+        avatar_url,
+        None,
+        None,
+    )
+    .await?;
 
     Ok(Json(user.into()))
 }
@@ -430,6 +446,8 @@ mod tests {
                 totp_secret: None,
                 totp_enabled: false,
                 deleted_at: None,
+                email_notifications: true,
+                marketing_emails: false,
             }))
         });
         mock_tenant_repo.expect_create().returning(|name, slug| {
@@ -510,6 +528,8 @@ mod tests {
                 totp_secret: None,
                 totp_enabled: false,
                 deleted_at: None,
+                email_notifications: true,
+                marketing_emails: false,
             }))
         });
 
@@ -577,6 +597,8 @@ mod tests {
                 totp_secret: Some("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP".to_string()),
                 totp_enabled: true,
                 deleted_at: None,
+                email_notifications: true,
+                marketing_emails: false,
             }))
         });
 
@@ -647,6 +669,8 @@ mod tests {
                 totp_secret: Some("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP".to_string()),
                 totp_enabled: true,
                 deleted_at: None,
+                email_notifications: true,
+                marketing_emails: false,
             }))
         });
 
@@ -714,6 +738,8 @@ mod tests {
                 totp_secret: Some("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP".to_string()),
                 totp_enabled: true,
                 deleted_at: None,
+                email_notifications: true,
+                marketing_emails: false,
             }))
         });
 
@@ -796,13 +822,16 @@ mod tests {
                 totp_secret: None,
                 totp_enabled: false,
                 deleted_at: None,
+                email_notifications: true,
+                marketing_emails: false,
             }))
         });
-        mock_repo
-            .expect_update_profile()
-            .returning(|id, first_name, last_name, avatar_url| {
+        mock_repo.expect_update_profile().returning(
+            |id, first_name, last_name, avatar_url, email_notifications, marketing_emails| {
                 assert!(first_name.is_none());
                 assert!(last_name.is_none());
+                assert!(email_notifications.is_none());
+                assert!(marketing_emails.is_none());
                 let url = avatar_url.expect("expected avatar url");
                 assert!(url.starts_with("/uploads/avatars/"));
                 Ok(User {
@@ -817,8 +846,11 @@ mod tests {
                     totp_secret: None,
                     totp_enabled: false,
                     deleted_at: None,
+                    email_notifications: true,
+                    marketing_emails: false,
                 })
-            });
+            },
+        );
 
         let state = AppState {
             ctx: crate::application::ApiContext::default(),
@@ -864,6 +896,8 @@ mod tests {
             None,
             None,
             Some(format!("/uploads/avatars/{filename}")),
+            None,
+            None,
         )
         .await
         .unwrap();
@@ -895,6 +929,8 @@ mod tests {
                 totp_secret: None,
                 totp_enabled: false,
                 deleted_at: None,
+                email_notifications: true,
+                marketing_emails: false,
             }))
         });
         mock_repo.expect_update_password().returning(|_, _| Ok(()));
@@ -967,6 +1003,8 @@ mod tests {
                 totp_secret: None,
                 totp_enabled: false,
                 deleted_at: None,
+                email_notifications: true,
+                marketing_emails: false,
             }))
         });
 
@@ -1036,6 +1074,8 @@ mod tests {
                 totp_secret: None,
                 totp_enabled: false,
                 deleted_at: None,
+                email_notifications: true,
+                marketing_emails: false,
             }))
         });
         mock_repo

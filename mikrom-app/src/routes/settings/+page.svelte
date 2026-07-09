@@ -125,6 +125,8 @@
       if (profileResult.data) {
         firstNameDraft = profileResult.data.first_name || "";
         lastNameDraft = profileResult.data.last_name || "";
+        emailNotifications = profileResult.data.email_notifications ?? true;
+        marketingEmails = profileResult.data.marketing_emails ?? false;
       }
 
       if (githubResult.data) githubAccounts = githubResult.data;
@@ -318,6 +320,32 @@
       billingActionLoading = false;
     }
   }
+
+  let savingNotifications = $state(false);
+
+  async function saveNotifications() {
+    const token = getToken();
+    if (!token) return;
+
+    savingNotifications = true;
+    const result = await updateUserProfile(token, {
+      email_notifications: emailNotifications,
+      marketing_emails: marketingEmails,
+    });
+    savingNotifications = false;
+
+    if (result.error) {
+      toast.error(result.error);
+      return;
+    }
+
+    if (result.data) {
+      emailNotifications = result.data.email_notifications ?? true;
+      marketingEmails = result.data.marketing_emails ?? false;
+      void refreshProfile();
+    }
+    toast.success("Notification preferences updated successfully");
+  }
 </script>
 
 <svelte:head>
@@ -399,7 +427,13 @@
         onConnectGithub={connectGithub}
       />
     {:else if activeTab === "notifications"}
-      <SettingsNotificationsSection bind:emailNotifications bind:marketingEmails />
+      <SettingsNotificationsSection
+        bind:emailNotifications
+        bind:marketingEmails
+        {loading}
+        saving={savingNotifications}
+        onSave={saveNotifications}
+      />
     {/if}
   </div>
 </DashboardLayout>

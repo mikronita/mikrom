@@ -25,6 +25,8 @@ pub struct User {
     pub totp_secret: Option<String>,
     pub totp_enabled: bool,
     pub deleted_at: Option<DateTime<Utc>>,
+    pub email_notifications: bool,
+    pub marketing_emails: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -50,6 +52,8 @@ pub trait UserRepository: Send + Sync {
         first_name: Option<String>,
         last_name: Option<String>,
         avatar_url: Option<String>,
+        email_notifications: Option<bool>,
+        marketing_emails: Option<bool>,
     ) -> DomainResult<User>;
     async fn update_password(&self, id: Uuid, new_password_hash: String) -> DomainResult<()>;
     async fn update_totp_secret(&self, id: Uuid, secret: Option<String>) -> DomainResult<()>;

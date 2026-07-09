@@ -159,6 +159,8 @@ async fn test_port_propagation_from_builder_to_deployment() {
             totp_secret: None,
             totp_enabled: false,
             deleted_at: None,
+            email_notifications: true,
+            marketing_emails: false,
         }))
     });
 
@@ -250,6 +252,8 @@ async fn test_zero_reported_port_keeps_original_deployment_port() {
             totp_secret: None,
             totp_enabled: false,
             deleted_at: None,
+            email_notifications: true,
+            marketing_emails: false,
         }))
     });
 

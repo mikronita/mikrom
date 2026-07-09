@@ -1,12 +1,19 @@
 <script lang="ts">
-  import { Card, CardContent, CardDescription, CardHeader, CardTitle, Switch } from "$lib/components";
+  import Loader2 from "@lucide/svelte/icons/loader-2";
+  import { Button, Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle, Switch } from "$lib/components";
 
   let {
     emailNotifications = $bindable(true),
     marketingEmails = $bindable(false),
+    loading = false,
+    saving = false,
+    onSave,
   } = $props<{
     emailNotifications?: boolean;
     marketingEmails?: boolean;
+    loading?: boolean;
+    saving?: boolean;
+    onSave: () => Promise<void> | void;
   }>();
 </script>
 
@@ -24,7 +31,7 @@
               <div class="text-base font-medium">Deployment status</div>
               <p class="text-sm text-muted-foreground">Receive an email when your deployments finish or fail.</p>
             </div>
-            <Switch bind:checked={emailNotifications} aria-label="Toggle deployment status notifications" />
+            <Switch bind:checked={emailNotifications} aria-label="Toggle deployment status notifications" disabled={loading || saving} />
           </div>
         </CardContent>
       </Card>
@@ -35,10 +42,18 @@
               <div class="text-base font-medium">Marketing emails</div>
               <p class="text-sm text-muted-foreground">New features, tips and weekly summaries.</p>
             </div>
-            <Switch bind:checked={marketingEmails} aria-label="Toggle marketing emails" />
+            <Switch bind:checked={marketingEmails} aria-label="Toggle marketing emails" disabled={loading || saving} />
           </div>
         </CardContent>
       </Card>
     </div>
   </CardContent>
+  <CardFooter class="justify-end">
+    <Button onclick={onSave} disabled={loading || saving}>
+      {#if saving}
+        <Loader2 class="size-4 animate-spin" />
+      {/if}
+      Save changes
+    </Button>
+  </CardFooter>
 </Card>
