@@ -39,6 +39,9 @@ pub enum Commands {
     /// Personal Access Token Management
     #[command(subcommand)]
     Pat(PatCommands),
+    /// Platform Notifications Management
+    #[command(subcommand)]
+    Notification(NotificationCommands),
     /// Project Management
     #[command(subcommand)]
     Project(ProjectCommands),
@@ -430,4 +433,27 @@ pub enum PatCommands {
         #[arg(long, short, help = "Skip confirmation prompt")]
         yes: bool,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum NotificationCommands {
+    /// List platform notifications
+    List {
+        /// Only show unread notifications
+        #[arg(long, short, help = "Only list unread notifications")]
+        unread_only: bool,
+        /// Limit the number of notifications to return
+        #[arg(long, short, help = "Limit results count")]
+        limit: Option<i64>,
+        /// Offset for pagination
+        #[arg(long, help = "Pagination offset")]
+        offset: Option<i64>,
+    },
+    /// Mark a notification as read
+    Read {
+        /// ID of the notification
+        id: String,
+    },
+    /// Mark all notifications as read
+    ReadAll,
 }

@@ -295,3 +295,28 @@ pub struct CreatedTokenResponse {
 pub struct CreateTokenRequest {
     pub name: String,
 }
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct Notification {
+    pub id: String,
+    pub user_id: String,
+    pub tenant_id: Option<String>,
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+    pub route: String,
+    pub entity_name: Option<String>,
+    pub resource_id: Option<String>,
+    pub metadata: serde_json::Value,
+    pub created_at: String,
+    pub read_at: Option<String>,
+    pub is_read: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct NotificationListResponse {
+    pub notifications: Vec<Notification>,
+    pub unread_count: i64,
+    pub has_more: bool,
+    pub next_offset: i64,
+}

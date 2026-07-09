@@ -657,6 +657,60 @@ impl ApiClient for ReqwestApiClient {
         )
         .await
     }
+
+    async fn list_user_notifications(
+        &self,
+        unread_only: bool,
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> CliResult<NotificationListResponse> {
+        let mut query = vec![];
+        if unread_only {
+            query.push(("unread_only", "true".to_string()));
+        }
+        if let Some(l) = limit {
+            query.push(("limit", l.to_string()));
+        }
+        if let Some(o) = offset {
+            query.push(("offset", o.to_string()));
+        }
+
+        let path = if query.is_empty() {
+            "notifications".to_string()
+        } else {
+            let q_str = query
+                .into_iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<_>>()
+                .join("&");
+            format!("notifications?{}", q_str)
+        };
+
+        self.request(
+            reqwest::Method::GET,
+            &path,
+            None::<()>,
+        )
+        .await
+    }
+
+    async fn mark_user_notification_read(&self, notification_id: &str) -> CliResult<()> {
+        self.request_no_body(
+            reqwest::Method::POST,
+            &format!("notifications/{}/read", notification_id),
+            self.request_timeout,
+        )
+        .await
+    }
+
+    async fn mark_all_user_notifications_read(&self) -> CliResult<()> {
+        self.request_no_body(
+            reqwest::Method::POST,
+            "notifications/read-all",
+            self.request_timeout,
+        )
+        .await
+    }
 }
 
 #[cfg(test)]

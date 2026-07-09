@@ -102,7 +102,7 @@ mod tests {
     use super::*;
     use mikrom_cli::commands::{
         AppCommands, AuthCommands, ConfigCommands, DbCommands, DeploymentCommands, OutputFormat,
-        SystemCommands, VolumeSnapshotCommands, PatCommands,
+        SystemCommands, VolumeSnapshotCommands, PatCommands, NotificationCommands,
     };
 
     #[test]
@@ -810,6 +810,39 @@ mod tests {
                 assert!(yes);
             },
             _ => panic!("expected pat revoke"),
+        }
+    }
+
+    #[test]
+    fn test_cli_notification_list_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "notification", "list", "--unread-only", "--limit", "10"]).unwrap();
+        match cli.command {
+            Commands::Notification(NotificationCommands::List { unread_only, limit, offset }) => {
+                assert!(unread_only);
+                assert_eq!(limit, Some(10));
+                assert_eq!(offset, None);
+            },
+            _ => panic!("expected notification list"),
+        }
+    }
+
+    #[test]
+    fn test_cli_notification_read_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "notification", "read", "notif-123"]).unwrap();
+        match cli.command {
+            Commands::Notification(NotificationCommands::Read { id }) => {
+                assert_eq!(id, "notif-123");
+            },
+            _ => panic!("expected notification read"),
+        }
+    }
+
+    #[test]
+    fn test_cli_notification_read_all_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "notification", "read-all"]).unwrap();
+        match cli.command {
+            Commands::Notification(NotificationCommands::ReadAll) => {},
+            _ => panic!("expected notification read-all"),
         }
     }
 }
