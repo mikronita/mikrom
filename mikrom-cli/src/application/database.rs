@@ -150,6 +150,134 @@ pub async fn handle(ctx: &CliContext, cmd: DbCommands, output: OutputFormat) -> 
                 println!("  {}", info.psql_command);
             }
         },
+        DbCommands::Branches { id } => {
+            let dbs = ctx.client.list_databases().await?;
+            let db = dbs.into_iter().find(|d| d.name == id || d.id == id).ok_or_else(|| {
+                crate::domain::error::CliError::Validation(format!("Database '{}' not found", id))
+            })?;
+            let branches = ctx.client.list_database_branches(&db.id).await?;
+            if output == OutputFormat::Json {
+                println!("{}", serde_json::to_string_pretty(&branches)?);
+            } else {
+                let rows = branches
+                    .iter()
+                    .map(|b| {
+                        vec![
+                            b.database_name.clone(),
+                            b.branch_name.clone(),
+                            b.neon_tenant_id.clone().unwrap_or_default(),
+                            b.neon_timeline_id.clone().unwrap_or_default(),
+                            ui::status_label(&b.status),
+                            if b.is_current { "Yes".to_string() } else { "No".to_string() },
+                        ]
+                    })
+                    .collect::<Vec<_>>();
+                ui::table(
+                    &format!("🌿 Branches for database {}", db.name),
+                    &["Database", "Branch", "Neon Tenant ID", "Neon Timeline ID", "Status", "Current"],
+                    &rows,
+                );
+            }
+        },
+        DbCommands::Backup { id } => {
+            let dbs = ctx.client.list_databases().await?;
+            let db = dbs.into_iter().find(|d| d.name == id || d.id == id).ok_or_else(|| {
+                crate::domain::error::CliError::Validation(format!("Database '{}' not found", id))
+            })?;
+            let backup = ctx.client.get_database_backups(&db.id).await?;
+            if output == OutputFormat::Json {
+                println!("{}", serde_json::to_string_pretty(&backup)?);
+            } else {
+                ui::step(ui::INFO, &ui::bold_cyan(&format!("Backup Details for Database: {}", db.name)));
+                ui::label_value(ui::INFO, "Database ID", &backup.database_id);
+                ui::label_value(ui::SYS, "Backup Strategy", &backup.backup_strategy);
+                ui::label_value(ui::WATCH, "Recovery Mode", &backup.recovery_mode);
+                ui::label_value(ui::SYS, "Retention Valid", &if backup.retention_valid { "Yes".to_string() } else { "No".to_string() });
+                ui::label_value(ui::PORT, "Neon Tenant ID", &backup.neon_tenant_id.unwrap_or_default());
+                ui::label_value(ui::PORT, "Neon Timeline ID", &backup.neon_timeline_id.unwrap_or_default());
+                ui::label_value(ui::SYS, "Tenant Gen", &backup.tenant_gen.map(|g| g.to_string()).unwrap_or_else(|| "1".to_string()));
+                ui::label_value(ui::WATCH, "Status", &ui::status_label(&backup.status));
+                ui::label_value(ui::CLOCK, "Created At", &backup.created_at);
+                ui::label_value(ui::CLOCK, "Updated At", &backup.updated_at);
+            }
+        },
+        DbCommands::Snapshots { id } => {
+            let dbs = ctx.client.list_databases().await?;
+            let db = dbs.into_iter().find(|d| d.name == id || d.id == id).ok_or_else(|| {
+                crate::domain::error::CliError::Validation(format!("Database '{}' not found", id))
+            })?;
+            let resp = ctx.client.list_database_snapshots(&db.id).await?;
+            if output == OutputFormat::Json {
+                println!("{}", serde_json::to_string_pretty(&resp)?);
+            } else {
+                if !resp.success {
+                    ui::error(&resp.message);
+                }
+                let rows = resp.snapshots
+                    .iter()
+                    .map(|s| {
+                        let size_str = if s.size_bytes >= 1024 * 1024 * 1024 {
+                            format!("{:.1} GiB", s.size_bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+                        } else if s.size_bytes >= 1024 * 1024 {
+                            format!("{:.1} MiB", s.size_bytes as f64 / (1024.0 * 1024.0))
+                        } else {
+                            format!("{:.1} KiB", s.size_bytes as f64 / 1024.0)
+                        };
+                        let datetime = chrono::DateTime::from_timestamp(s.created_at, 0)
+                            .map(|dt| dt.to_rfc3339())
+                            .unwrap_or_else(|| s.created_at.to_string());
+                        vec![
+                            s.id.clone(),
+                            s.name.clone(),
+                            ui::status_label(&s.vm_status),
+                            size_str,
+                            datetime,
+                        ]
+                    })
+                    .collect::<Vec<_>>();
+                ui::table(
+                    &format!("📸 Snapshots for database {}", db.name),
+                    &["ID", "Name", "VM Status", "Size", "Created At"],
+                    &rows,
+                );
+            }
+        },
+        DbCommands::SnapshotCreate { id, name } => {
+            let dbs = ctx.client.list_databases().await?;
+            let db = dbs.into_iter().find(|d| d.name == id || d.id == id).ok_or_else(|| {
+                crate::domain::error::CliError::Validation(format!("Database '{}' not found", id))
+            })?;
+            let resp = ctx.client.create_database_snapshot(&db.id, &name).await?;
+            if resp.success {
+                ui::success(&format!("Snapshot '{}' created: {}", name, resp.message));
+            } else {
+                ui::error(&format!("Failed to create snapshot: {}", resp.message));
+            }
+        },
+        DbCommands::SnapshotRestore { id, snapshot } => {
+            let dbs = ctx.client.list_databases().await?;
+            let db = dbs.into_iter().find(|d| d.name == id || d.id == id).ok_or_else(|| {
+                crate::domain::error::CliError::Validation(format!("Database '{}' not found", id))
+            })?;
+            let resp = ctx.client.restore_database_snapshot(&db.id, &snapshot).await?;
+            if resp.success {
+                ui::success(&format!("Database restored to snapshot '{}': {}", snapshot, resp.message));
+            } else {
+                ui::error(&format!("Failed to restore snapshot: {}", resp.message));
+            }
+        },
+        DbCommands::SnapshotDelete { id, snapshot } => {
+            let dbs = ctx.client.list_databases().await?;
+            let db = dbs.into_iter().find(|d| d.name == id || d.id == id).ok_or_else(|| {
+                crate::domain::error::CliError::Validation(format!("Database '{}' not found", id))
+            })?;
+            let resp = ctx.client.delete_database_snapshot(&db.id, &snapshot).await?;
+            if resp.success {
+                ui::success(&format!("Snapshot '{}' deleted: {}", snapshot, resp.message));
+            } else {
+                ui::error(&format!("Failed to delete snapshot: {}", resp.message));
+            }
+        },
     }
     Ok(())
 }
@@ -327,5 +455,269 @@ mod tests {
             },
             other => panic!("expected validation error, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn branches_resolves_id_and_lists_branches() {
+        let mut mock = MockApiClient::new();
+        mock.expect_list_databases().times(1).returning(|| {
+            Ok(vec![DatabaseInfo {
+                id: "db-1".to_string(),
+                name: "orders".to_string(),
+                engine: "neon".to_string(),
+                postgres_version: 16,
+                status: "running".to_string(),
+                vcpus: 1,
+                memory_mib: 512,
+                disk_mib: 1024,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            }])
+        });
+        mock.expect_list_database_branches()
+            .times(1)
+            .returning(|db_id| {
+                assert_eq!(db_id, "db-1");
+                Ok(vec![crate::domain::models::DatabaseBranchInfo {
+                    database_id: "db-1".to_string(),
+                    database_name: "orders".to_string(),
+                    branch_name: "main".to_string(),
+                    neon_tenant_id: Some("tenant-1".to_string()),
+                    neon_timeline_id: Some("timeline-1".to_string()),
+                    tenant_gen: Some(1),
+                    status: "ready".to_string(),
+                    is_current: true,
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    updated_at: "2026-01-01T00:00:00Z".to_string(),
+                }])
+            });
+
+        let ctx = test_ctx(mock);
+        let result = handle(
+            &ctx,
+            DbCommands::Branches {
+                id: "orders".to_string(),
+            },
+            OutputFormat::Json,
+        )
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn backup_resolves_id_and_returns_details() {
+        let mut mock = MockApiClient::new();
+        mock.expect_list_databases().times(1).returning(|| {
+            Ok(vec![DatabaseInfo {
+                id: "db-1".to_string(),
+                name: "orders".to_string(),
+                engine: "neon".to_string(),
+                postgres_version: 16,
+                status: "running".to_string(),
+                vcpus: 1,
+                memory_mib: 512,
+                disk_mib: 1024,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            }])
+        });
+        mock.expect_get_database_backups()
+            .times(1)
+            .returning(|db_id| {
+                assert_eq!(db_id, "db-1");
+                Ok(crate::domain::models::DatabaseBackupInfo {
+                    database_id: "db-1".to_string(),
+                    database_name: "orders".to_string(),
+                    backup_strategy: "continuous".to_string(),
+                    recovery_mode: "pitr".to_string(),
+                    retention_valid: true,
+                    neon_tenant_id: Some("tenant-1".to_string()),
+                    neon_timeline_id: Some("timeline-1".to_string()),
+                    tenant_gen: Some(1),
+                    status: "active".to_string(),
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    updated_at: "2026-01-01T00:00:00Z".to_string(),
+                })
+            });
+
+        let ctx = test_ctx(mock);
+        let result = handle(
+            &ctx,
+            DbCommands::Backup {
+                id: "orders".to_string(),
+            },
+            OutputFormat::Json,
+        )
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn snapshots_resolves_id_and_lists_snapshots() {
+        let mut mock = MockApiClient::new();
+        mock.expect_list_databases().times(1).returning(|| {
+            Ok(vec![DatabaseInfo {
+                id: "db-1".to_string(),
+                name: "orders".to_string(),
+                engine: "neon".to_string(),
+                postgres_version: 16,
+                status: "running".to_string(),
+                vcpus: 1,
+                memory_mib: 512,
+                disk_mib: 1024,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            }])
+        });
+        mock.expect_list_database_snapshots()
+            .times(1)
+            .returning(|db_id| {
+                assert_eq!(db_id, "db-1");
+                Ok(crate::domain::models::DatabaseSnapshotListResponse {
+                    success: true,
+                    message: "Ok".to_string(),
+                    snapshots: vec![crate::domain::models::DatabaseSnapshot {
+                        id: "snap-1".to_string(),
+                        name: "my-snap".to_string(),
+                        created_at: 1717891200,
+                        size_bytes: 1024 * 1024,
+                        vm_status: "running".to_string(),
+                    }],
+                })
+            });
+
+        let ctx = test_ctx(mock);
+        let result = handle(
+            &ctx,
+            DbCommands::Snapshots {
+                id: "orders".to_string(),
+            },
+            OutputFormat::Json,
+        )
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn snapshot_create_resolves_id_and_creates_snapshot() {
+        let mut mock = MockApiClient::new();
+        mock.expect_list_databases().times(1).returning(|| {
+            Ok(vec![DatabaseInfo {
+                id: "db-1".to_string(),
+                name: "orders".to_string(),
+                engine: "neon".to_string(),
+                postgres_version: 16,
+                status: "running".to_string(),
+                vcpus: 1,
+                memory_mib: 512,
+                disk_mib: 1024,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            }])
+        });
+        mock.expect_create_database_snapshot()
+            .times(1)
+            .returning(|db_id, name| {
+                assert_eq!(db_id, "db-1");
+                assert_eq!(name, "my-snap");
+                Ok(crate::domain::models::DatabaseSnapshotActionResponse {
+                    success: true,
+                    message: "created".to_string(),
+                })
+            });
+
+        let ctx = test_ctx(mock);
+        let result = handle(
+            &ctx,
+            DbCommands::SnapshotCreate {
+                id: "orders".to_string(),
+                name: "my-snap".to_string(),
+            },
+            OutputFormat::Json,
+        )
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn snapshot_restore_resolves_id_and_restores_snapshot() {
+        let mut mock = MockApiClient::new();
+        mock.expect_list_databases().times(1).returning(|| {
+            Ok(vec![DatabaseInfo {
+                id: "db-1".to_string(),
+                name: "orders".to_string(),
+                engine: "neon".to_string(),
+                postgres_version: 16,
+                status: "running".to_string(),
+                vcpus: 1,
+                memory_mib: 512,
+                disk_mib: 1024,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            }])
+        });
+        mock.expect_restore_database_snapshot()
+            .times(1)
+            .returning(|db_id, snap_name| {
+                assert_eq!(db_id, "db-1");
+                assert_eq!(snap_name, "my-snap");
+                Ok(crate::domain::models::DatabaseSnapshotActionResponse {
+                    success: true,
+                    message: "restored".to_string(),
+                })
+            });
+
+        let ctx = test_ctx(mock);
+        let result = handle(
+            &ctx,
+            DbCommands::SnapshotRestore {
+                id: "orders".to_string(),
+                snapshot: "my-snap".to_string(),
+            },
+            OutputFormat::Json,
+        )
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn snapshot_delete_resolves_id_and_deletes_snapshot() {
+        let mut mock = MockApiClient::new();
+        mock.expect_list_databases().times(1).returning(|| {
+            Ok(vec![DatabaseInfo {
+                id: "db-1".to_string(),
+                name: "orders".to_string(),
+                engine: "neon".to_string(),
+                postgres_version: 16,
+                status: "running".to_string(),
+                vcpus: 1,
+                memory_mib: 512,
+                disk_mib: 1024,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            }])
+        });
+        mock.expect_delete_database_snapshot()
+            .times(1)
+            .returning(|db_id, snap_name| {
+                assert_eq!(db_id, "db-1");
+                assert_eq!(snap_name, "my-snap");
+                Ok(crate::domain::models::DatabaseSnapshotActionResponse {
+                    success: true,
+                    message: "deleted".to_string(),
+                })
+            });
+
+        let ctx = test_ctx(mock);
+        let result = handle(
+            &ctx,
+            DbCommands::SnapshotDelete {
+                id: "orders".to_string(),
+                snapshot: "my-snap".to_string(),
+            },
+            OutputFormat::Json,
+        )
+        .await;
+
+        assert!(result.is_ok());
     }
 }

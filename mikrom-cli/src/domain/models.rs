@@ -213,3 +213,64 @@ pub struct ProjectInfo {
     pub name: String,
     pub created_at: Option<String>,
 }
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DatabaseBranchInfo {
+    pub database_id: String,
+    pub database_name: String,
+    pub branch_name: String,
+    pub neon_tenant_id: Option<String>,
+    pub neon_timeline_id: Option<String>,
+    pub tenant_gen: Option<u32>,
+    pub status: String,
+    pub is_current: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DatabaseBackupInfo {
+    pub database_id: String,
+    pub database_name: String,
+    pub backup_strategy: String,
+    pub recovery_mode: String,
+    pub retention_valid: bool,
+    pub neon_tenant_id: Option<String>,
+    pub neon_timeline_id: Option<String>,
+    pub tenant_gen: Option<u32>,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DatabaseSnapshot {
+    pub id: String,
+    pub name: String,
+    pub created_at: i64,
+    pub size_bytes: u64,
+    pub vm_status: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DatabaseSnapshotListResponse {
+    pub success: bool,
+    pub message: String,
+    pub snapshots: Vec<DatabaseSnapshot>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DatabaseSnapshotActionResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct DatabaseSnapshotNameRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct DatabaseRestoreSnapshotRequest {
+    pub snapshot_name: String,
+}

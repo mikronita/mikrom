@@ -711,4 +711,73 @@ mod tests {
             _ => panic!("expected db connection"),
         }
     }
+
+    #[test]
+    fn test_cli_db_branches_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "db", "branches", "db-1"]).unwrap();
+        match cli.command {
+            Commands::Db(DbCommands::Branches { id }) => {
+                assert_eq!(id, "db-1");
+            },
+            _ => panic!("expected db branches"),
+        }
+    }
+
+    #[test]
+    fn test_cli_db_backup_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "db", "backup", "db-1"]).unwrap();
+        match cli.command {
+            Commands::Db(DbCommands::Backup { id }) => {
+                assert_eq!(id, "db-1");
+            },
+            _ => panic!("expected db backup"),
+        }
+    }
+
+    #[test]
+    fn test_cli_db_snapshots_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "db", "snapshots", "db-1"]).unwrap();
+        match cli.command {
+            Commands::Db(DbCommands::Snapshots { id }) => {
+                assert_eq!(id, "db-1");
+            },
+            _ => panic!("expected db snapshots"),
+        }
+    }
+
+    #[test]
+    fn test_cli_db_snapshot_create_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "db", "snapshot-create", "db-1", "my-snap"]).unwrap();
+        match cli.command {
+            Commands::Db(DbCommands::SnapshotCreate { id, name }) => {
+                assert_eq!(id, "db-1");
+                assert_eq!(name, "my-snap");
+            },
+            _ => panic!("expected db snapshot-create"),
+        }
+    }
+
+    #[test]
+    fn test_cli_db_snapshot_restore_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "db", "snapshot-restore", "db-1", "my-snap"]).unwrap();
+        match cli.command {
+            Commands::Db(DbCommands::SnapshotRestore { id, snapshot }) => {
+                assert_eq!(id, "db-1");
+                assert_eq!(snapshot, "my-snap");
+            },
+            _ => panic!("expected db snapshot-restore"),
+        }
+    }
+
+    #[test]
+    fn test_cli_db_snapshot_delete_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "db", "snapshot-delete", "db-1", "my-snap"]).unwrap();
+        match cli.command {
+            Commands::Db(DbCommands::SnapshotDelete { id, snapshot }) => {
+                assert_eq!(id, "db-1");
+                assert_eq!(snapshot, "my-snap");
+            },
+            _ => panic!("expected db snapshot-delete"),
+        }
+    }
 }

@@ -563,6 +563,60 @@ impl ApiClient for ReqwestApiClient {
         .await
     }
 
+    async fn list_database_branches(&self, db_id: &str) -> CliResult<Vec<DatabaseBranchInfo>> {
+        self.request(
+            reqwest::Method::GET,
+            &format!("databases/{}/branches", db_id),
+            None::<()>,
+        )
+        .await
+    }
+
+    async fn get_database_backups(&self, db_id: &str) -> CliResult<DatabaseBackupInfo> {
+        self.request(
+            reqwest::Method::GET,
+            &format!("databases/{}/backups", db_id),
+            None::<()>,
+        )
+        .await
+    }
+
+    async fn list_database_snapshots(&self, db_id: &str) -> CliResult<DatabaseSnapshotListResponse> {
+        self.request(
+            reqwest::Method::GET,
+            &format!("databases/{}/backups/snapshots", db_id),
+            None::<()>,
+        )
+        .await
+    }
+
+    async fn create_database_snapshot(&self, db_id: &str, name: &str) -> CliResult<DatabaseSnapshotActionResponse> {
+        self.request(
+            reqwest::Method::POST,
+            &format!("databases/{}/backups/snapshots", db_id),
+            Some(DatabaseSnapshotNameRequest { name: name.to_string() }),
+        )
+        .await
+    }
+
+    async fn restore_database_snapshot(&self, db_id: &str, snapshot_name: &str) -> CliResult<DatabaseSnapshotActionResponse> {
+        self.request(
+            reqwest::Method::POST,
+            &format!("databases/{}/backups/restore", db_id),
+            Some(DatabaseRestoreSnapshotRequest { snapshot_name: snapshot_name.to_string() }),
+        )
+        .await
+    }
+
+    async fn delete_database_snapshot(&self, db_id: &str, snapshot_name: &str) -> CliResult<DatabaseSnapshotActionResponse> {
+        self.request(
+            reqwest::Method::DELETE,
+            &format!("databases/{}/backups/snapshots/{}", db_id, snapshot_name),
+            None::<()>,
+        )
+        .await
+    }
+
     async fn list_projects(&self) -> CliResult<Vec<ProjectInfo>> {
         self.request(reqwest::Method::GET, "projects", None::<()>)
             .await

@@ -352,6 +352,45 @@ pub enum DbCommands {
         #[arg(help = "Name or ID of the database")]
         id: String,
     },
+    /// List branches for a database
+    Branches {
+        #[arg(help = "Name or ID of the database")]
+        id: String,
+    },
+    /// Show backup details for a database
+    Backup {
+        #[arg(help = "Name or ID of the database")]
+        id: String,
+    },
+    /// List snapshots for a database
+    Snapshots {
+        #[arg(help = "Name or ID of the database")]
+        id: String,
+    },
+    /// Create a new snapshot of a database
+    #[command(name = "snapshot-create")]
+    SnapshotCreate {
+        #[arg(help = "Name or ID of the database")]
+        id: String,
+        #[arg(help = "Snapshot name")]
+        name: String,
+    },
+    /// Restore a database to a specific snapshot
+    #[command(name = "snapshot-restore")]
+    SnapshotRestore {
+        #[arg(help = "Name or ID of the database")]
+        id: String,
+        #[arg(help = "Snapshot name to restore")]
+        snapshot: String,
+    },
+    /// Delete a database snapshot
+    #[command(name = "snapshot-delete")]
+    SnapshotDelete {
+        #[arg(help = "Name or ID of the database")]
+        id: String,
+        #[arg(help = "Snapshot name to delete")]
+        snapshot: String,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]

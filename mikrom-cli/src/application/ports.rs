@@ -74,6 +74,12 @@ pub trait ApiClient: Send + Sync {
     async fn create_database(&self, req: CreateDatabaseRequest) -> CliResult<DatabaseInfo>;
     async fn delete_database(&self, db_id: &str) -> CliResult<()>;
     async fn get_database_connection_info(&self, db_id: &str) -> CliResult<DatabaseConnectionInfo>;
+    async fn list_database_branches(&self, db_id: &str) -> CliResult<Vec<DatabaseBranchInfo>>;
+    async fn get_database_backups(&self, db_id: &str) -> CliResult<DatabaseBackupInfo>;
+    async fn list_database_snapshots(&self, db_id: &str) -> CliResult<DatabaseSnapshotListResponse>;
+    async fn create_database_snapshot(&self, db_id: &str, name: &str) -> CliResult<DatabaseSnapshotActionResponse>;
+    async fn restore_database_snapshot(&self, db_id: &str, snapshot_name: &str) -> CliResult<DatabaseSnapshotActionResponse>;
+    async fn delete_database_snapshot(&self, db_id: &str, snapshot_name: &str) -> CliResult<DatabaseSnapshotActionResponse>;
 
     async fn list_projects(&self) -> CliResult<Vec<ProjectInfo>>;
     async fn create_project(&self, name: &str) -> CliResult<ProjectInfo>;
