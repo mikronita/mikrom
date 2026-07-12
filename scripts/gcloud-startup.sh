@@ -1,7 +1,19 @@
 #!/usr/bin/env bash
 set -ex
 
+LOG_FILE="/var/log/mikrom-install.log"
+# Asegurar que las salidas vayan a syslog y a un archivo dedicado de log
+exec > >(tee -a "$LOG_FILE") 2>&1
+
 echo "[*] Iniciando aprovisionamiento de Mikrom..."
+
+# Leer metadatos de configuración de GCP
+echo "[*] Leyendo metadatos de configuración de GCP..."
+GIT_REPO=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/git-repo || echo "https://github.com/mikronita/mikrom.git")
+GIT_BRANCH=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/git-branch || echo "main")
+GIT_TOKEN=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/git-token || echo "")
+SSH_PUBLIC_KEYS=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/ssh-public-keys || echo "")
+
 
 # 1. Instalar dependencias básicas
 apt-get update
@@ -37,7 +49,18 @@ ln -sf "/opt/zig-linux-x86_64-${ZIG_VERSION}/zig" /usr/local/bin/zig
 
 # 2. Clonar repositorio
 REPO_DIR="/opt/mikrom"
-git clone https://github.com/mikrom-platform/mikrom.git "$REPO_DIR" || git clone https://github.com/mikronita/mikrom.git "$REPO_DIR"
+
+GIT_REPO_AUTH="$GIT_REPO"
+if [ -n "$GIT_TOKEN" ]; then
+    # Insertar token en URL de Github
+    GIT_REPO_AUTH=$(echo "$GIT_REPO" | sed -E "s|https://|https://${GIT_TOKEN}@|")
+fi
+
+echo "[*] Clonando repositorio: $GIT_REPO (rama: $GIT_BRANCH)..."
+if ! git clone -b "$GIT_BRANCH" "$GIT_REPO_AUTH" "$REPO_DIR"; then
+    echo "[!] Error al clonar rama $GIT_BRANCH. Reintentando con rama main..."
+    git clone -b "main" "$GIT_REPO_AUTH" "$REPO_DIR"
+fi
 cd "$REPO_DIR"
 
 # 3. Arrancar Base Infrastructure en Docker
@@ -119,6 +142,8 @@ cd "$REPO_DIR"
 # 5. Generar rootfs para MicroVMs
 export FC_BASE_ROOTFS=/opt/firecracker/base-rootfs.ext4
 mkdir -p /opt/firecracker
+export SSH_PUBLIC_KEYS="$SSH_PUBLIC_KEYS"
+export REGISTRY_URL="127.0.0.1:5000/mikrom"
 ./scripts/build-base-rootfs.sh
 
 # 6. Obtener IP pública y configurar variables de entorno
