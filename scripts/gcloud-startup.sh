@@ -22,7 +22,7 @@ apt-get update
 apt-get install -y \
     curl git build-essential cmake pkg-config libssl-dev libelf-dev libbpf-dev \
     protobuf-compiler debootstrap wireguard-tools iptables iproute2 jq \
-    ca-certificates gnupg lsb-release
+    ca-certificates gnupg lsb-release librados-dev librbd-dev
 
 # Instalar Docker
 mkdir -p /etc/apt/keyrings
