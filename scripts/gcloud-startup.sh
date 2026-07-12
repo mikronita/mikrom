@@ -137,7 +137,10 @@ cmake --build target/tundra-build --parallel
 cp target/tundra-build/tundra-nat64 target/release/tundra-nat64
 cargo build --release
 
-# Instalar binarios
+# Instalar binarios (eliminando primero para evitar "Text file busy" si están corriendo)
+rm -f /usr/local/bin/mikrom-api /usr/local/bin/mikrom-scheduler /usr/local/bin/mikrom-builder /usr/local/bin/tundra-nat64
+rm -f /usr/bin/mikrom-agent /usr/bin/mikrom-router /usr/bin/mikrom-dns /usr/bin/mikrom-network /usr/bin/mikrom /usr/bin/mikrom-init
+
 cp target/release/mikrom-api /usr/local/bin/
 cp target/release/mikrom-scheduler /usr/local/bin/
 cp target/release/mikrom-builder /usr/local/bin/
