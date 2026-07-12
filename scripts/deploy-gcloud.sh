@@ -14,15 +14,20 @@ if ! command -v gcloud &>/dev/null; then
     exit 1
 fi
 
-# Verificar si las credenciales de aplicación (ADC) están configuradas para Terraform
-if ! gcloud auth application-default print-access-token &>/dev/null; then
+# Configurar credenciales de GCP para Terraform
+if gcloud auth application-default print-access-token &>/dev/null; then
+    echo "[*] Usando Application Default Credentials (ADC) existentes..."
+elif gcloud auth print-access-token &>/dev/null; then
+    echo "[*] Usando token de sesión activo de gcloud CLI..."
+    export GOOGLE_OAUTH_ACCESS_TOKEN=$(gcloud auth print-access-token)
+else
     echo "================================================="
     echo "  Configuración de Credenciales de GCP"
     echo "================================================="
-    echo "[*] Terraform requiere las Application Default Credentials (ADC) de GCP."
-    echo "[*] Se abrirá el navegador para autenticarte..."
-    echo ""
-    gcloud auth application-default login
+    echo "[*] No se detectaron credenciales activas."
+    echo "[*] Iniciando autenticación de Google Cloud CLI..."
+    gcloud auth login
+    export GOOGLE_OAUTH_ACCESS_TOKEN=$(gcloud auth print-access-token)
     echo "================================================="
 fi
 
