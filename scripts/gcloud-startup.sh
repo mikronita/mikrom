@@ -144,7 +144,7 @@ cp target/release/mikrom-agent /usr/bin/
 cp target/release/mikrom-router /usr/bin/
 cp target/release/mikrom-dns /usr/bin/
 cp target/release/mikrom-network /usr/bin/
-cp target/release/mikrom-cli /usr/bin/
+cp target/release/mikrom /usr/bin/
 cp target/release/mikrom-init /usr/bin/
 cp target/release/tundra-nat64 /usr/local/bin/
 
