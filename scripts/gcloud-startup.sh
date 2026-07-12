@@ -184,6 +184,8 @@ ROUTER_ADDR=http://127.0.0.1:80
 FRONTEND_URL=https://${DASHBOARD_DOMAIN}
 USE_TLS=false
 MIKROM_NEON_DEV_MODE=true
+POLAR_ACCESS_TOKEN=polar_oat_replace_me
+POLAR_WEBHOOK_SECRET=replace-me-with-your-polar-webhook-secret
 EOF
 
 cat > /etc/mikrom/scheduler.env <<EOF
