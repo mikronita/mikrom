@@ -63,3 +63,9 @@ variable "ssh_public_keys" {
   default     = ""
   description = "Claves SSH públicas maestras a inyectar en el base-rootfs de las microVMs (separadas por salto de línea)"
 }
+
+variable "acme_staging" {
+  type        = bool
+  default     = false
+  description = "Define si se usa el entorno de pruebas (staging) de Let's Encrypt para certificados TLS"
+}

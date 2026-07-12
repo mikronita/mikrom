@@ -15,6 +15,7 @@ GIT_REPO=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.intern
 GIT_BRANCH=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/git-branch || echo "main")
 GIT_TOKEN=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/git-token || echo "")
 SSH_PUBLIC_KEYS=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/ssh-public-keys || echo "")
+ACME_STAGING=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/acme-staging || echo "false")
 
 
 # 1. Instalar dependencias básicas
@@ -218,7 +219,7 @@ MASTER_KEY=${MASTER_KEY_VAL}
 DATA_DIR=/var/lib/mikrom-router
 STATE_CACHE_PATH=/var/lib/mikrom-router/state.json
 WIREGUARD_PORT=51820
-ACME_STAGING=true
+ACME_STAGING=${ACME_STAGING}
 EOF
 
 cat > /etc/mikrom/dns.env <<EOF

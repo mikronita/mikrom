@@ -63,6 +63,7 @@ resource "google_compute_instance" "mikrom" {
     git-branch      = var.git_branch
     git-token       = var.git_token
     ssh-public-keys = var.ssh_public_keys
+    acme-staging    = var.acme_staging
   }
 
   metadata_startup_script = file("${path.module}/../scripts/gcloud-startup.sh")

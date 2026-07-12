@@ -115,6 +115,15 @@ else
     SSH_KEY_CONTENT=${input_ssh:-""}
 fi
 
+# Preguntar por Let's Encrypt Staging
+read -p "¿Usar Let's Encrypt Staging (pruebas con certificado no confiable)? (yes/no) [no]: " input_acme
+input_acme=${input_acme:-"no"}
+if [ "$input_acme" = "yes" ]; then
+    T_ACME_STAGING="true"
+else
+    T_ACME_STAGING="false"
+fi
+
 # Convertir Spot VM a booleano de Terraform
 if [ "$USE_SPOT" = "yes" ]; then
     T_USE_SPOT="true"
@@ -138,6 +147,7 @@ use_spot        = ${T_USE_SPOT}
 git_repo        = "${GIT_REPO}"
 git_branch      = "${GIT_BRANCH}"
 git_token       = "${GIT_TOKEN}"
+acme_staging    = ${T_ACME_STAGING}
 ssh_public_keys = <<EOT
 ${SSH_KEY_CONTENT}
 EOT
