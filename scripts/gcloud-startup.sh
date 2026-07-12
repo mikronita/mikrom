@@ -67,6 +67,7 @@ if [ -d "$REPO_DIR/.git" ]; then
     # Intentar checkout de la rama configurada, o usar main por defecto
     git checkout "$GIT_BRANCH" || git checkout main
     git pull origin "$GIT_BRANCH" || git pull origin main
+    git submodule update --init --recursive
 else
     echo "[*] Clonando repositorio: $GIT_REPO (rama: $GIT_BRANCH)..."
     if ! git clone -b "$GIT_BRANCH" "$GIT_REPO_AUTH" "$REPO_DIR"; then
@@ -74,6 +75,7 @@ else
         git clone -b "main" "$GIT_REPO_AUTH" "$REPO_DIR"
     fi
     cd "$REPO_DIR"
+    git submodule update --init --recursive
 fi
 
 # 3. Arrancar Base Infrastructure en Docker
