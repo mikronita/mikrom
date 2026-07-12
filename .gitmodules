@@ -1,0 +1,3 @@
+[submodule "tundra-nat64"]
+	path = tundra-nat64
+	url = https://github.com/vitlabuda/tundra-nat64.git
