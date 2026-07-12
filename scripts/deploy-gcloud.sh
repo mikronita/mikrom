@@ -14,6 +14,18 @@ if ! command -v gcloud &>/dev/null; then
     exit 1
 fi
 
+# Verificar si las credenciales de aplicación (ADC) están configuradas para Terraform
+if ! gcloud auth application-default print-access-token &>/dev/null; then
+    echo "================================================="
+    echo "  Configuración de Credenciales de GCP"
+    echo "================================================="
+    echo "[*] Terraform requiere las Application Default Credentials (ADC) de GCP."
+    echo "[*] Se abrirá el navegador para autenticarte..."
+    echo ""
+    gcloud auth application-default login
+    echo "================================================="
+fi
+
 # Detectar configuración por defecto de GCP
 PROJECT_ID=$(gcloud config get-value project 2>/dev/null || echo "")
 ZONE="us-central1-a"
