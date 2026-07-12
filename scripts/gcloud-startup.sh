@@ -44,8 +44,9 @@ export CARGO_HOME=/opt/rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
 export PATH="/opt/rust/bin:$PATH"
 
-# Instalar Zig (v0.17.0-dev.704+b8cb78023)
-ZIG_VERSION="0.17.0-dev.704+b8cb78023"
+# Instalar Zig (obteniendo dinámicamente la última versión dev de master)
+ZIG_VERSION=$(curl -s https://ziglang.org/download/index.json | jq -r '.master.version')
+echo "[*] Descargando e instalando Zig versión ${ZIG_VERSION}..."
 curl -fsSL "https://ziglang.org/builds/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" | tar -xJ -C /opt
 ln -sf "/opt/zig-x86_64-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig
 
