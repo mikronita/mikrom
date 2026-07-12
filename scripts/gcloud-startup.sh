@@ -44,10 +44,10 @@ export CARGO_HOME=/opt/rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
 export PATH="/opt/rust/bin:$PATH"
 
-# Instalar Zig (v0.13.0)
-ZIG_VERSION="0.13.0"
-curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" | tar -xJ -C /opt
-ln -sf "/opt/zig-linux-x86_64-${ZIG_VERSION}/zig" /usr/local/bin/zig
+# Instalar Zig (v0.17.0-dev.704+b8cb78023)
+ZIG_VERSION="0.17.0-dev.704+b8cb78023"
+curl -fsSL "https://ziglang.org/builds/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" | tar -xJ -C /opt
+ln -sf "/opt/zig-x86_64-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig
 
 # 2. Clonar repositorio
 REPO_DIR="/opt/mikrom"
