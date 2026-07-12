@@ -58,12 +58,22 @@ if [ -n "$GIT_TOKEN" ]; then
     GIT_REPO_AUTH=$(echo "$GIT_REPO" | sed -E "s|https://|https://${GIT_TOKEN}@|")
 fi
 
-echo "[*] Clonando repositorio: $GIT_REPO (rama: $GIT_BRANCH)..."
-if ! git clone -b "$GIT_BRANCH" "$GIT_REPO_AUTH" "$REPO_DIR"; then
-    echo "[!] Error al clonar rama $GIT_BRANCH. Reintentando con rama main..."
-    git clone -b "main" "$GIT_REPO_AUTH" "$REPO_DIR"
+if [ -d "$REPO_DIR/.git" ]; then
+    echo "[*] El repositorio ya existe en $REPO_DIR. Actualizando con git pull..."
+    cd "$REPO_DIR"
+    git remote set-url origin "$GIT_REPO_AUTH"
+    git fetch origin
+    # Intentar checkout de la rama configurada, o usar main por defecto
+    git checkout "$GIT_BRANCH" || git checkout main
+    git pull origin "$GIT_BRANCH" || git pull origin main
+else
+    echo "[*] Clonando repositorio: $GIT_REPO (rama: $GIT_BRANCH)..."
+    if ! git clone -b "$GIT_BRANCH" "$GIT_REPO_AUTH" "$REPO_DIR"; then
+        echo "[!] Error al clonar rama $GIT_BRANCH. Reintentando con rama main..."
+        git clone -b "main" "$GIT_REPO_AUTH" "$REPO_DIR"
+    fi
+    cd "$REPO_DIR"
 fi
-cd "$REPO_DIR"
 
 # 3. Arrancar Base Infrastructure en Docker
 # Modificamos docker-compose para incluir un registro local de OCI (para mikrom-builder)
