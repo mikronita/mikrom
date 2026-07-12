@@ -5,6 +5,8 @@ LOG_FILE="/var/log/mikrom-install.log"
 # Asegurar que las salidas vayan a syslog y a un archivo dedicado de log
 exec > >(tee -a "$LOG_FILE") 2>&1
 
+export HOME="/root"
+
 echo "[*] Iniciando aprovisionamiento de Mikrom..."
 
 # Leer metadatos de configuración de GCP
