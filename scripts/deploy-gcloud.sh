@@ -68,9 +68,15 @@ fi
 
 read -p "Región de GCE [$REGION]: " input_region
 REGION=${input_region:-$REGION}
+if [[ "$REGION" =~ ^eu- ]]; then
+    REGION="europe-${REGION#eu-}"
+fi
 
 read -p "Zona de GCE [$ZONE]: " input_zone
 ZONE=${input_zone:-$ZONE}
+if [[ "$ZONE" =~ ^eu- ]]; then
+    ZONE="europe-${ZONE#eu-}"
+fi
 
 read -p "Nombre de la instancia [$INSTANCE_NAME]: " input_name
 INSTANCE_NAME=${input_name:-$INSTANCE_NAME}
