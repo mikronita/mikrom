@@ -189,6 +189,8 @@ USE_TLS=false
 MIKROM_NEON_DEV_MODE=true
 POLAR_ACCESS_TOKEN=polar_oat_replace_me
 POLAR_WEBHOOK_SECRET=replace-me-with-your-polar-webhook-secret
+ROUTER_TLS_HOSTNAME=${API_DOMAIN}
+FRONTEND_TLS_HOSTNAME=${DASHBOARD_DOMAIN}
 EOF
 
 cat > /etc/mikrom/scheduler.env <<EOF
