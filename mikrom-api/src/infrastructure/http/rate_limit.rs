@@ -406,6 +406,13 @@ impl RateLimiter {
             return None;
         }
 
+        if Self::path_matches(path, &["v1", "auth", "captcha"]) {
+            return Some(RouteTarget {
+                class: RateLimitClass::Public,
+                bucket: "auth.captcha",
+            });
+        }
+
         if Self::path_matches(path, &["v1", "auth", "register"]) {
             return Some(RouteTarget {
                 class: RateLimitClass::Public,
@@ -750,6 +757,7 @@ impl RateLimiter {
     fn route_specific_rpm(&self, bucket: &str) -> Option<u32> {
         match bucket {
             "auth.login" => Some(self.config.rate_limit_auth_login_rpm),
+            "auth.captcha" => Some(self.config.rate_limit_auth_register_rpm),
             "auth.register" => Some(self.config.rate_limit_auth_register_rpm),
             "github.install" => Some(self.config.rate_limit_github_install_rpm),
             "apps.create" => Some(self.config.rate_limit_apps_create_rpm),

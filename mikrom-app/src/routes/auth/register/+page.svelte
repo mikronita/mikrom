@@ -1,16 +1,41 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import { tick } from "svelte";
-    import Loader2 from "@lucide/svelte/icons/loader-2";
+  import { tick, onMount } from "svelte";
+  import Loader2 from "@lucide/svelte/icons/loader-2";
   import UserPlus from "@lucide/svelte/icons/user-plus";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import { Card, Field, Input, Button } from "$lib/components";
-  import { register } from "$lib/api";
+  import { register, getCaptcha } from "$lib/api";
   import { toast } from "$lib/toast";
 
   let email = "";
   let password = "";
   let confirmPassword = "";
   let loading = false;
+
+  let captchaId = "";
+  let captchaImage = "";
+  let captchaAnswer = "";
+  let loadingCaptcha = false;
+
+  async function loadCaptcha() {
+    loadingCaptcha = true;
+    const result = await getCaptcha();
+    loadingCaptcha = false;
+    if (result.error) {
+      toast.error(result.error);
+      return;
+    }
+    if (result.data) {
+      captchaId = result.data.captcha_id;
+      captchaImage = result.data.captcha_image;
+      captchaAnswer = "";
+    }
+  }
+
+  onMount(() => {
+    loadCaptcha();
+  });
 
   async function handleSubmit(event: SubmitEvent) {
     event.preventDefault();
@@ -30,12 +55,23 @@
       return;
     }
 
+    if (!captchaAnswer) {
+      toast.error("Please answer the captcha challenge");
+      return;
+    }
+
     loading = true;
-    const result = await register({ email, password });
+    const result = await register({
+      email,
+      password,
+      captcha_id: captchaId,
+      captcha_answer: captchaAnswer,
+    });
     loading = false;
 
     if (result.error) {
       toast.error(result.error);
+      loadCaptcha();
       return;
     }
 
@@ -76,6 +112,56 @@
           <Field label="Confirm Password" forId="confirmPassword">
             <Input id="confirmPassword" type="password" bind:value={confirmPassword} placeholder="Repeat your password" required disabled={loading} />
           </Field>
+
+          {#if captchaImage}
+            <div class="flex flex-col gap-2">
+              <div class="text-sm font-medium text-foreground">Security Check (Captcha)</div>
+              <div class="flex items-center gap-3">
+                <div class="relative flex items-center justify-center rounded-md border border-border bg-muted/30 p-1.5 shadow-xs overflow-hidden select-none min-w-[150px] min-h-[50px]">
+                  {#if loadingCaptcha}
+                    <div class="absolute inset-0 flex items-center justify-center bg-muted/60 backdrop-blur-xs">
+                      <Loader2 class="size-4 animate-spin text-muted-foreground" />
+                    </div>
+                  {/if}
+                  <img src={captchaImage} alt="Captcha challenge" class="h-10 select-none pointer-events-none" />
+                </div>
+                
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onclick={loadCaptcha}
+                  disabled={loadingCaptcha || loading}
+                  class="size-10 cursor-pointer transition-transform duration-200 active:scale-95 animate-in fade-in"
+                  aria-label="Refresh captcha"
+                >
+                  <RefreshCw class="size-4 text-muted-foreground" />
+                </Button>
+              </div>
+              
+              <Input
+                id="captchaAnswer"
+                type="text"
+                bind:value={captchaAnswer}
+                placeholder="Result of the operation"
+                required
+                disabled={loading || loadingCaptcha}
+                class="w-full mt-1"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="none"
+              />
+            </div>
+          {:else}
+            <div class="flex flex-col gap-2">
+              <div class="h-5 w-24 animate-pulse rounded bg-muted"></div>
+              <div class="flex gap-3">
+                <div class="h-[50px] w-[150px] animate-pulse rounded border border-border bg-muted/30"></div>
+                <div class="h-10 w-10 animate-pulse rounded border border-border bg-muted/30"></div>
+              </div>
+              <div class="h-10 w-full animate-pulse rounded border border-border bg-muted/30 mt-1"></div>
+            </div>
+          {/if}
 
           <div class="flex flex-col gap-4 pt-2">
             <Button

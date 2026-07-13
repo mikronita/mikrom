@@ -99,6 +99,14 @@ export async function mockControlPlaneApi(
       return;
     }
 
+    if (pathname === `${apiBase}/auth/captcha` && method === "GET") {
+      await route.fulfill(jsonResponse({
+        captcha_id: "fake-captcha-id",
+        captcha_image: "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTUwIiBoZWlnaHQ9IjUwIiB2aWV3Qm94PSIwIDAgMTUwIDUwIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNmMWY1ZjkiIHJ4PSI2Ii8+PC9zdmc+",
+      }));
+      return;
+    }
+
     if (pathname === `${apiBase}/auth/register` && method === "POST") {
       await route.fulfill(jsonResponse({ message: "Account created", user_id: "user-1" }));
       return;

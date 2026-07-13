@@ -7,6 +7,7 @@ use axum::{
     extract::{Multipart, State},
     http::StatusCode,
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 use tracing::info;
@@ -18,6 +19,20 @@ pub struct RegisterRequest {
     pub password: String,
     pub first_name: Option<String>,
     pub last_name: Option<String>,
+    pub captcha_id: String,
+    pub captcha_answer: String,
+}
+
+#[derive(Debug, Serialize, rovo::schemars::JsonSchema)]
+pub struct CaptchaResponse {
+    pub captcha_id: String,
+    pub captcha_image: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CaptchaToken {
+    pub answer: String,
+    pub expires_at: i64,
 }
 
 #[derive(Debug, Serialize, rovo::schemars::JsonSchema)]
@@ -94,11 +109,109 @@ fn public_avatar_url(filename: &str) -> String {
 const MAX_AVATAR_BYTES: u64 = 2 * 1024 * 1024;
 
 #[rovo::rovo]
+pub async fn get_captcha(State(state): State<AppState>) -> ApiResult<Json<CaptchaResponse>> {
+    use rand::RngExt;
+    let mut rng = rand::rng();
+    let is_addition = rng.random_bool(0.5);
+    let (challenge, answer) = if is_addition {
+        let num1 = rng.random_range(1..10);
+        let num2 = rng.random_range(1..10);
+        (
+            format!("{} + {} = ?", num1, num2),
+            (num1 + num2).to_string(),
+        )
+    } else {
+        let num1 = rng.random_range(5..15);
+        let num2 = rng.random_range(1..=num1);
+        (
+            format!("{} - {} = ?", num1, num2),
+            (num1 - num2).to_string(),
+        )
+    };
+
+    let line_x1 = rng.random_range(5..40);
+    let line_y1 = rng.random_range(5..45);
+    let line_x2 = rng.random_range(110..145);
+    let line_y2 = rng.random_range(5..45);
+
+    let line2_x1 = rng.random_range(5..40);
+    let line2_y1 = rng.random_range(5..45);
+    let line2_x2 = rng.random_range(110..145);
+    let line2_y2 = rng.random_range(5..45);
+
+    let text_x = rng.random_range(20..35);
+    let text_y = rng.random_range(28..38);
+    let rotate_angle = rng.random_range(-8..=8);
+
+    let svg = format!(
+        r##"<svg width="150" height="50" viewBox="0 0 150 50" xmlns="http://www.w3.org/2000/svg">
+            <rect width="100%" height="100%" fill="#f1f5f9" rx="6"/>
+            <line x1="{}" y1="{}" x2="{}" y2="{}" stroke="#cbd5e1" stroke-width="2"/>
+            <line x1="{}" y1="{}" x2="{}" y2="{}" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="{}" y="{}" font-family="sans-serif" font-size="20" font-weight="bold" fill="#1e293b" transform="rotate({} {} {})">{}</text>
+        </svg>"##,
+        line_x1,
+        line_y1,
+        line_x2,
+        line_y2,
+        line2_x1,
+        line2_y1,
+        line2_x2,
+        line2_y2,
+        text_x,
+        text_y,
+        rotate_angle,
+        text_x,
+        text_y,
+        challenge
+    );
+
+    let base64_image = format!("data:image/svg+xml;base64,{}", STANDARD.encode(svg));
+    let expires_at = chrono::Utc::now().timestamp() + 300;
+
+    let token = CaptchaToken { answer, expires_at };
+
+    let token_str = serde_json::to_string(&token).map_err(|e| {
+        crate::error::ApiError::Internal(format!("Failed to serialize captcha token: {}", e))
+    })?;
+
+    let captcha_id = crate::infrastructure::crypto::encrypt(&token_str, &state.master_key)?;
+
+    Ok(Json(CaptchaResponse {
+        captcha_id,
+        captcha_image: base64_image,
+    }))
+}
+
+#[rovo::rovo]
 pub async fn register(
     State(state): State<AppState>,
     Json(payload): Json<RegisterRequest>,
 ) -> ApiResult<(StatusCode, Json<AuthResponse>)> {
     info!(email = %payload.email, "Registering new user");
+
+    if payload.captcha_id.is_empty() {
+        return Err(crate::error::ApiError::BadRequest(
+            "Captcha ID is required".to_string(),
+        ));
+    }
+    let decrypted_token_str =
+        crate::infrastructure::crypto::decrypt(&payload.captcha_id, &state.master_key)?;
+    let token: CaptchaToken = serde_json::from_str(&decrypted_token_str)
+        .map_err(|_| crate::error::ApiError::BadRequest("Invalid captcha token".to_string()))?;
+
+    let now = chrono::Utc::now().timestamp();
+    if now > token.expires_at {
+        return Err(crate::error::ApiError::BadRequest(
+            "Captcha has expired".to_string(),
+        ));
+    }
+
+    if payload.captcha_answer.trim().to_lowercase() != token.answer.trim().to_lowercase() {
+        return Err(crate::error::ApiError::BadRequest(
+            "Incorrect captcha answer".to_string(),
+        ));
+    }
 
     let result = AuthService::register(
         &state,
@@ -497,11 +610,21 @@ mod tests {
             active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
         };
 
+        let token = CaptchaToken {
+            answer: "8".to_string(),
+            expires_at: chrono::Utc::now().timestamp() + 300,
+        };
+        let token_str = serde_json::to_string(&token).unwrap();
+        let captcha_id =
+            crate::infrastructure::crypto::encrypt(&token_str, &state.master_key).unwrap();
+
         let payload = RegisterRequest {
             email,
             password: "password".into(),
             first_name: None,
             last_name: None,
+            captcha_id,
+            captcha_answer: "8".to_string(),
         };
 
         let response = __register_impl(State(state), Json(payload)).await;

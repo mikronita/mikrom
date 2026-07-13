@@ -28,6 +28,13 @@ export interface ApiError {
 export interface RegisterRequest {
   email: string;
   password: string;
+  captcha_id: string;
+  captcha_answer: string;
+}
+
+export interface CaptchaResponse {
+  captcha_id: string;
+  captcha_image: string;
 }
 
 export interface RegisterResponse {
@@ -603,6 +610,20 @@ function getErrorMessage(result: unknown, fallback: string) {
     return (result as ApiError).error;
   }
   return fallback;
+}
+
+export async function getCaptcha() {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/auth/captcha`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+    const result = await parseJson<CaptchaResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch captcha") };
+    return { data: result as CaptchaResponse };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
 }
 
 export async function register(data: RegisterRequest) {

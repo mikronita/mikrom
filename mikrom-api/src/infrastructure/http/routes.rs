@@ -13,9 +13,9 @@ use tracing::Level;
 
 use crate::infrastructure::http::handlers::{
     auth::{
-        change_password, create_personal_access_token, delete_account, disable_totp, get_profile,
-        list_personal_access_tokens, login, register, revoke_personal_access_token, setup_totp,
-        update_profile, upload_avatar, verify_totp,
+        change_password, create_personal_access_token, delete_account, disable_totp, get_captcha,
+        get_profile, list_personal_access_tokens, login, register, revoke_personal_access_token,
+        setup_totp, update_profile, upload_avatar, verify_totp,
     },
     billing::{
         create_billing_checkout, create_billing_portal, get_billing_summary, list_billing_products,
@@ -75,6 +75,7 @@ pub fn create_app_with_rate_limits(
         .finish_api(&mut api);
 
     let protected_routes = Router::new()
+        .route(&format!("{}/auth/captcha", crate::API_V1), get(get_captcha))
         .route(&format!("{}/auth/register", crate::API_V1), post(register))
         .route(&format!("{}/auth/login", crate::API_V1), post(login))
         .route(
