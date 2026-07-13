@@ -26,25 +26,33 @@ resource "google_compute_firewall" "mikrom_rules" {
   depends_on = [google_project_service.compute]
 }
 
-# Instancia de GCE con virtualización anidada habilitada
-resource "google_compute_instance" "mikrom" {
-  name         = var.instance_name
+# Dirección IP estática externa para mantener la IP estable entre recreaciones de la instancia Spot
+resource "google_compute_address" "mikrom_ip" {
+  name        = "${var.instance_name}-ip"
+  region      = var.region
+  description = "Dirección IP pública estática para Mikrom"
+
+  depends_on = [google_project_service.compute]
+}
+
+# Plantilla de instancia de GCE con virtualización anidada habilitada
+resource "google_compute_instance_template" "mikrom_template" {
+  name_prefix  = "${var.instance_name}-template-"
   machine_type = var.machine_type
-  zone         = var.zone
   tags         = ["mikrom"]
 
-  boot_disk {
-    initialize_params {
-      image = "debian-cloud/debian-13"
-      size  = var.disk_size_gb
-      type  = "pd-ssd"
-    }
+  disk {
+    source_image = "debian-cloud/debian-13"
+    auto_delete  = true
+    boot         = true
+    disk_size_gb = var.disk_size_gb
+    disk_type    = "pd-ssd"
   }
 
   network_interface {
     network = "default"
     access_config {
-      # Asigna una dirección IP pública efímera
+      nat_ip = google_compute_address.mikrom_ip.address
     }
   }
 
@@ -68,5 +76,25 @@ resource "google_compute_instance" "mikrom" {
 
   metadata_startup_script = file("${path.module}/../scripts/gcloud-startup.sh")
 
+  lifecycle {
+    create_before_destroy = true
+  }
+
   depends_on = [google_project_service.compute]
 }
+
+# Grupo de Instancias Administrado (MIG) con tamaño objetivo de 1
+resource "google_compute_instance_group_manager" "mikrom_mig" {
+  name               = "${var.instance_name}-mig"
+  base_instance_name = var.instance_name
+  zone               = var.zone
+
+  version {
+    instance_template = google_compute_instance_template.mikrom_template.id
+  }
+
+  target_size = 1
+
+  depends_on = [google_project_service.compute]
+}
+

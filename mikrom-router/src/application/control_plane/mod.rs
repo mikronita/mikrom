@@ -485,13 +485,10 @@ mod tests {
 
     #[test]
     fn dashboard_route_defaults_to_plain_http_upstream() {
-        let route = build_route(
-            "dashboard.mikrom.spluca.org",
-            &[String::from("http://[::1]:3000")],
-        )
-        .expect("route should build");
+        let route = build_route("mikrom.spluca.org", &[String::from("http://[::1]:3000")])
+            .expect("route should build");
 
-        assert_eq!(route.host, "dashboard.mikrom.spluca.org");
+        assert_eq!(route.host, "mikrom.spluca.org");
         assert_eq!(route.targets, vec!["[::1]:3000".to_string()]);
         assert!(!route.use_tls);
         assert!(route.tls_alternative_cn.is_none());

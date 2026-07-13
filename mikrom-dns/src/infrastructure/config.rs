@@ -71,7 +71,9 @@ impl DnsConfig {
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or(30);
 
-        let listen_addr = "[::]:53"
+        let listen_addr_str =
+            std::env::var("DNS_LISTEN_ADDR").unwrap_or_else(|_| "[::]:53".to_string());
+        let listen_addr = listen_addr_str
             .parse()
             .context("Error parsing DNS listen address")?;
 

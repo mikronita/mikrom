@@ -165,7 +165,7 @@ fn default_api_upstream_url() -> String {
 }
 
 fn default_dashboard_host() -> String {
-    "dashboard.mikrom.spluca.org".to_string()
+    "mikrom.spluca.org".to_string()
 }
 
 fn default_dashboard_upstream_url() -> String {

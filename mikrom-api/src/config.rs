@@ -175,7 +175,7 @@ fn default_router_tls_hostname() -> String {
 }
 
 fn default_frontend_tls_hostname() -> String {
-    "dashboard.mikrom.spluca.org".to_string()
+    "mikrom.spluca.org".to_string()
 }
 
 fn default_acme_check_interval() -> u64 {
@@ -191,7 +191,7 @@ fn default_router_addr() -> String {
 }
 
 fn default_frontend_url() -> String {
-    "https://dashboard.mikrom.spluca.org".to_string()
+    "https://mikrom.spluca.org".to_string()
 }
 
 fn default_use_tls() -> bool {
@@ -269,7 +269,7 @@ mod tests {
         let config = ApiConfig::default();
         assert!(!config.acme_staging);
         assert_eq!(config.router_tls_hostname, "api.mikrom.spluca.org");
-        assert_eq!(config.frontend_tls_hostname, "dashboard.mikrom.spluca.org");
+        assert_eq!(config.frontend_tls_hostname, "mikrom.spluca.org");
     }
 
     #[test]

@@ -167,8 +167,8 @@ export REGISTRY_URL="127.0.0.1:5000/mikrom"
 
 # 6. Obtener IP pública y configurar variables de entorno
 PUBLIC_IP=$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip)
-API_DOMAIN="api.${PUBLIC_IP}.sslip.io"
-DASHBOARD_DOMAIN="dashboard.${PUBLIC_IP}.sslip.io"
+API_DOMAIN="api.mikrom.spluca.org"
+DASHBOARD_DOMAIN="mikrom.spluca.org"
 JWT_SEC=$(openssl rand -hex 32)
 MASTER_KEY_VAL=$(openssl rand -hex 32)
 

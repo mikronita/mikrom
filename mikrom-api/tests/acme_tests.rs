@@ -94,7 +94,7 @@ async fn test_acme_worker_iteration_skips_if_no_domains() {
         "http://invalid-url",
         true,
         "api.mikrom.spluca.org",
-        "dashboard.mikrom.spluca.org",
+        "mikrom.spluca.org",
         "master-key",
         "http://localhost:80",
     )
