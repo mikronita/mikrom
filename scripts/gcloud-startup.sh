@@ -227,8 +227,9 @@ export REGISTRY_URL="127.0.0.1:5000/mikrom"
 PUBLIC_IP=$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip)
 API_DOMAIN="api.mikrom.spluca.org"
 DASHBOARD_DOMAIN="mikrom.spluca.org"
-JWT_SEC=$(openssl rand -hex 32)
-MASTER_KEY_VAL=$(openssl rand -hex 32)
+JWT_SEC=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/jwt-secret || openssl rand -hex 32)
+MASTER_KEY_VAL=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/master-key || openssl rand -hex 32)
+
 
 mkdir -p /etc/mikrom
 
@@ -396,8 +397,13 @@ cat > /etc/systemd/resolved.conf.d/mikrom-dns.conf <<EOF
 DNSStubListener=no
 EOF
 
-# Apuntar resolv.conf a la resolución de DNS upstream real manejada por systemd-resolved
-ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+# Configurar resolv.conf estático con mikrom-dns (localhost) y fallback a Google DNS
+rm -f /etc/resolv.conf
+cat > /etc/resolv.conf <<EOF
+nameserver 127.0.0.1
+nameserver 8.8.8.8
+EOF
+
 
 # Reiniciar systemd-resolved si está activo/habilitado
 if systemctl is-active --quiet systemd-resolved || systemctl is-enabled --quiet systemd-resolved; then

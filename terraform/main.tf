@@ -78,6 +78,8 @@ resource "google_compute_instance_template" "mikrom_template" {
     db-name-api       = google_sql_database.mikrom_api_db.name
     db-name-scheduler = google_sql_database.mikrom_scheduler_db.name
     db-name-router    = google_sql_database.mikrom_router_db.name
+    master-key        = random_id.master_key.hex
+    jwt-secret        = random_id.jwt_secret.hex
   }
 
   metadata_startup_script = file("${path.module}/../scripts/gcloud-startup.sh")
@@ -127,6 +129,16 @@ resource "random_password" "db_password" {
   length           = 16
   special          = true
   override_special = "!#$%&*()-_=+[]{}<>:?"
+}
+
+# Generar una clave maestra de encriptación persistente
+resource "random_id" "master_key" {
+  byte_length = 32
+}
+
+# Generar una clave secreta JWT persistente
+resource "random_id" "jwt_secret" {
+  byte_length = 32
 }
 
 # Instancia de Cloud SQL para PostgreSQL 17
