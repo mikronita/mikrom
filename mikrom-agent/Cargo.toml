@@ -30,7 +30,7 @@ reqwest = { workspace = true, features = ["json"] }
 aya = "0.14"
 aya-log = "0.3"
 mikrom-agent-ebpf-common = { path = "../mikrom-agent-ebpf-common", features = ["user"] }
-x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
+x25519-dalek = { version = "3.0.0", features = ["static_secrets"] }
 rtnetlink = "0.21"
 netlink-packet-route = "0.30"
 hex = "0.4.3"
