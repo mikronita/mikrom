@@ -16,15 +16,15 @@ prost = "0.14"
 
 mikrom-proto = { path = "../mikrom-proto" }
 
-x25519-dalek = { version = "3.0.0", features = ["static_secrets"] }
-rtnetlink = "0.21"
-netlink-packet-route = "0.30"
+x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
+rtnetlink = "0.14"
+netlink-packet-route = "0.19"
 neli = { version = "0.7.4", features = ["async"] }
 libc = "0.2"
 
 base64 = "0.22.1"
 hex = "0.4.3"
-rand = "0.10"
+rand = "0.8"
 blake3 = "1.5"
 zeroize = { version = "1.8", features = ["derive"] }
 
