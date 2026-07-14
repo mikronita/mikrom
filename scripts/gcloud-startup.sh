@@ -23,7 +23,25 @@ apt-get update
 apt-get install -y \
     curl git build-essential cmake pkg-config libssl-dev libelf-dev libbpf-dev \
     protobuf-compiler debootstrap wireguard-tools iptables iproute2 jq \
-    ca-certificates gnupg lsb-release librados-dev librbd-dev
+    ca-certificates gnupg lsb-release librados-dev librbd-dev libcap2-bin
+
+# Instalar Firecracker y Jailer
+echo "[*] Descargando e instalando Firecracker y Jailer..."
+FC_VERSION="v1.10.0"
+ARCH="$(uname -m)"
+curl -L "https://github.com/firecracker-microvm/firecracker/releases/download/${FC_VERSION}/firecracker-${FC_VERSION}-${ARCH}.tgz" | tar -xz
+mv release-${FC_VERSION}-${ARCH}/firecracker-${FC_VERSION}-${ARCH} /usr/bin/firecracker
+mv release-${FC_VERSION}-${ARCH}/jailer-${FC_VERSION}-${ARCH} /usr/bin/jailer
+chmod +x /usr/bin/firecracker /usr/bin/jailer
+rm -rf release-${FC_VERSION}-${ARCH}
+
+# Instalar Cloud Hypervisor
+echo "[*] Descargando e instalando Cloud Hypervisor..."
+CH_VERSION="v42.0"
+curl -L "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/${CH_VERSION}/cloud-hypervisor-static" -o /usr/bin/cloud-hypervisor
+chmod +x /usr/bin/cloud-hypervisor
+setcap cap_net_admin+ep /usr/bin/cloud-hypervisor
+
 
 # Instalar Docker
 mkdir -p /etc/apt/keyrings
