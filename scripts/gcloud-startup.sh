@@ -388,6 +388,22 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
+# Deshabilitar DNSStubListener en systemd-resolved para liberar el puerto 53 para mikrom-dns
+echo "[*] Configurando systemd-resolved para liberar el puerto 53..."
+mkdir -p /etc/systemd/resolved.conf.d
+cat > /etc/systemd/resolved.conf.d/mikrom-dns.conf <<EOF
+[Resolve]
+DNSStubListener=no
+EOF
+
+# Apuntar resolv.conf a la resolución de DNS upstream real manejada por systemd-resolved
+ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+
+# Reiniciar systemd-resolved si está activo/habilitado
+if systemctl is-active --quiet systemd-resolved || systemctl is-enabled --quiet systemd-resolved; then
+    systemctl restart systemd-resolved
+fi
+
 # Recargar systemd
 systemctl daemon-reload
 

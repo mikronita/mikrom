@@ -63,6 +63,18 @@ export FC_BASE_ROOTFS=/opt/firecracker/base-rootfs.ext4
 export REGISTRY_URL="127.0.0.1:5000/mikrom"
 ./scripts/build-base-rootfs.sh
 
+# Deshabilitar DNSStubListener en systemd-resolved para liberar el puerto 53 para mikrom-dns
+if systemctl is-active --quiet systemd-resolved || systemctl is-enabled --quiet systemd-resolved; then
+    echo "[*] Configurando systemd-resolved para liberar el puerto 53..."
+    mkdir -p /etc/systemd/resolved.conf.d
+    cat > /etc/systemd/resolved.conf.d/mikrom-dns.conf <<EOF
+[Resolve]
+DNSStubListener=no
+EOF
+    ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+    systemctl restart systemd-resolved
+fi
+
 echo "[*] 8. Reiniciando servicios systemd..."
 systemctl daemon-reload
 
