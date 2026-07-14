@@ -67,11 +67,17 @@ resource "google_compute_instance_template" "mikrom_template" {
   }
 
   metadata = {
-    git-repo        = var.git_repo
-    git-branch      = var.git_branch
-    git-token       = var.git_token
-    ssh-public-keys = var.ssh_public_keys
-    acme-staging    = var.acme_staging
+    git-repo          = var.git_repo
+    git-branch        = var.git_branch
+    git-token         = var.git_token
+    ssh-public-keys   = var.ssh_public_keys
+    acme-staging      = var.acme_staging
+    db-host           = google_sql_database_instance.mikrom_db.public_ip_address
+    db-user           = google_sql_user.mikrom_db_user.name
+    db-password       = google_sql_user.mikrom_db_user.password
+    db-name-api       = google_sql_database.mikrom_api_db.name
+    db-name-scheduler = google_sql_database.mikrom_scheduler_db.name
+    db-name-router    = google_sql_database.mikrom_router_db.name
   }
 
   metadata_startup_script = file("${path.module}/../scripts/gcloud-startup.sh")
@@ -80,7 +86,14 @@ resource "google_compute_instance_template" "mikrom_template" {
     create_before_destroy = true
   }
 
-  depends_on = [google_project_service.compute]
+  depends_on = [
+    google_project_service.compute,
+    google_sql_database_instance.mikrom_db,
+    google_sql_user.mikrom_db_user,
+    google_sql_database.mikrom_api_db,
+    google_sql_database.mikrom_scheduler_db,
+    google_sql_database.mikrom_router_db
+  ]
 }
 
 # Grupo de Instancias Administrado (MIG) con tamaño objetivo de 1
@@ -97,4 +110,72 @@ resource "google_compute_instance_group_manager" "mikrom_mig" {
 
   depends_on = [google_project_service.compute]
 }
+
+# Habilitar la API de Cloud SQL Admin
+resource "google_project_service" "sqladmin" {
+  service            = "sqladmin.googleapis.com"
+  disable_on_destroy = false
+}
+
+# Generar un sufijo aleatorio para el nombre de la instancia de base de datos
+resource "random_id" "db_name_suffix" {
+  byte_length = 4
+}
+
+# Generar una contraseña aleatoria y segura para la base de datos
+resource "random_password" "db_password" {
+  length           = 16
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}<>:?"
+}
+
+# Instancia de Cloud SQL para PostgreSQL 17
+resource "google_sql_database_instance" "mikrom_db" {
+  name             = "${var.instance_name}-db-${random_id.db_name_suffix.hex}"
+  database_version = "POSTGRES_17"
+  region           = var.region
+
+  settings {
+    tier    = var.db_tier
+    edition = "ENTERPRISE"
+
+    ip_configuration {
+      ipv4_enabled = true
+      # Permitir el acceso únicamente a la IP pública estática de la VM de Mikrom
+      authorized_networks {
+        name  = "mikrom-vm-ip"
+        value = "${google_compute_address.mikrom_ip.address}/32"
+      }
+    }
+  }
+
+  depends_on = [google_project_service.sqladmin]
+}
+
+
+# Usuario de base de datos principal
+resource "google_sql_user" "mikrom_db_user" {
+  name     = "mikrom"
+  instance = google_sql_database_instance.mikrom_db.name
+  password = random_password.db_password.result
+}
+
+# Base de datos para el servicio de API
+resource "google_sql_database" "mikrom_api_db" {
+  name     = "mikrom_api"
+  instance = google_sql_database_instance.mikrom_db.name
+}
+
+# Base de datos para el servicio de Scheduler
+resource "google_sql_database" "mikrom_scheduler_db" {
+  name     = "mikrom_scheduler"
+  instance = google_sql_database_instance.mikrom_db.name
+}
+
+# Base de datos para el servicio de Router (Pingora Ingress)
+resource "google_sql_database" "mikrom_router_db" {
+  name     = "mikrom_router"
+  instance = google_sql_database_instance.mikrom_db.name
+}
+
 

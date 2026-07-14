@@ -17,6 +17,15 @@ GIT_TOKEN=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.inter
 SSH_PUBLIC_KEYS=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/ssh-public-keys || echo "")
 ACME_STAGING=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/acme-staging || echo "false")
 
+# Leer configuración de base de datos desde los metadatos de GCP (con fallback a local para desarrollo/pruebas)
+DB_HOST=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/db-host || echo "127.0.0.1")
+DB_USER=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/db-user || echo "mikrom")
+DB_PASSWORD=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/db-password || echo "mikrom_password")
+DB_NAME_API=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/db-name-api || echo "mikrom_api")
+DB_NAME_SCHEDULER=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/db-name-scheduler || echo "mikrom_scheduler")
+DB_NAME_ROUTER=$(curl -s -f -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/db-name-router || echo "mikrom_router")
+
+
 
 # 1. Instalar dependencias básicas
 apt-get update
@@ -98,8 +107,38 @@ else
 fi
 
 # 3. Arrancar Base Infrastructure en Docker
-# Modificamos docker-compose para incluir un registro local de OCI (para mikrom-builder)
-cat > docker-compose.prod.yml <<'EOF'
+if [ "$DB_HOST" != "127.0.0.1" ]; then
+    echo "[*] Base de datos externa detectada ($DB_HOST). No se iniciará PostgreSQL local."
+    cat > docker-compose.prod.yml <<'EOF'
+services:
+  nats:
+    image: nats:2.10-alpine
+    restart: always
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+
+  buildkit:
+    image: moby/buildkit
+    container_name: buildkit
+    restart: always
+    privileged: true
+    command: ["buildkitd"]
+    volumes:
+      - buildkit_data:/var/lib/buildkit
+
+  registry:
+    image: registry:2
+    restart: always
+    ports:
+      - "127.0.0.1:5000:5000"
+
+volumes:
+  buildkit_data:
+EOF
+else
+    echo "[*] Base de datos local configurada. Arrancando PostgreSQL en Docker..."
+    cat > docker-compose.prod.yml <<'EOF'
 services:
   postgres:
     image: postgres:17-alpine
@@ -145,6 +184,7 @@ volumes:
   postgres_data:
   buildkit_data:
 EOF
+fi
 
 docker compose -f docker-compose.prod.yml up -d --wait
 
@@ -194,8 +234,8 @@ mkdir -p /etc/mikrom
 
 # Generar archivos .env
 cat > /etc/mikrom/api.env <<EOF
-DATABASE_URL=postgres://mikrom:mikrom_password@127.0.0.1:5432/mikrom_api
-ROUTER_DATABASE_URL=postgres://mikrom:mikrom_password@127.0.0.1:5432/mikrom_router
+DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME_API}
+ROUTER_DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME_ROUTER}
 JWT_SECRET=${JWT_SEC}
 MASTER_KEY=${MASTER_KEY_VAL}
 NATS_URL=nats://127.0.0.1:4222
@@ -212,7 +252,7 @@ FRONTEND_TLS_HOSTNAME=${DASHBOARD_DOMAIN}
 EOF
 
 cat > /etc/mikrom/scheduler.env <<EOF
-DATABASE_URL=postgres://mikrom:mikrom_password@127.0.0.1:5432/mikrom_scheduler
+DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME_SCHEDULER}
 NATS_URL=nats://127.0.0.1:4222
 USE_TLS=false
 EOF
@@ -233,7 +273,7 @@ MIKROM_NAT64_DIR=/var/lib/mikrom-agent/nat64
 EOF
 
 cat > /etc/mikrom/router.env <<EOF
-DATABASE_URL=postgres://mikrom:mikrom_password@127.0.0.1:5432/mikrom_router
+DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME_ROUTER}
 NATS_URL=nats://127.0.0.1:4222
 ROUTER_ID=router-1
 API_UPSTREAM_TARGETS=127.0.0.1:5001

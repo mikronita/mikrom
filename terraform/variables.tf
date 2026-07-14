@@ -69,3 +69,10 @@ variable "acme_staging" {
   default     = false
   description = "Define si se usa el entorno de pruebas (staging) de Let's Encrypt para certificados TLS"
 }
+
+variable "db_tier" {
+  type        = string
+  default     = "db-f1-micro"
+  description = "El tipo de máquina (tier) para la instancia de Cloud SQL"
+}
+
