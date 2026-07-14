@@ -1,5 +1,5 @@
 # 1. Planner stage
-FROM lukemathwalker/cargo-chef:latest-rust-1.96-trixie AS chef
+FROM lukemathwalker/cargo-chef:latest-rust-1.97-trixie AS chef
 WORKDIR /app
 
 FROM chef AS planner
