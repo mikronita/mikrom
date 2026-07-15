@@ -78,6 +78,10 @@ echo "[*] Descargando e instalando Zig versión ${ZIG_VERSION}..."
 curl -fsSL "https://ziglang.org/builds/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" | tar -xJ -C /opt
 ln -sf "/opt/zig-x86_64-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig
 
+# Instalar Railpack
+echo "[*] Descargando e instalando Railpack..."
+curl -sSL https://railpack.com/install.sh | sh -s -- --yes --bin-dir /usr/local/bin
+
 # 2. Clonar repositorio
 REPO_DIR="/opt/mikrom"
 
