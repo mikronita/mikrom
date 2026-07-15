@@ -274,10 +274,21 @@ pub async fn get_or_create_acme_account(
 
     if let Some(row) = row {
         let credentials_json: String = row.get("credentials_json");
-        let credentials = serde_json::from_str(&credentials_json)?;
-
-        info!("Using existing ACME account for {}", email);
-        return Ok(Account::builder()?.from_credentials(credentials).await?);
+        if credentials_json.contains(acme_url) {
+            let credentials = serde_json::from_str(&credentials_json)?;
+            info!("Using existing ACME account for {}", email);
+            return Ok(Account::builder()?.from_credentials(credentials).await?);
+        } else {
+            info!(
+                "Saved ACME credentials for {} do not match requested URL {}, deleting stale account row",
+                email, acme_url
+            );
+            sqlx::query("DELETE FROM acme_accounts WHERE email = $1 AND is_staging = $2")
+                .bind(email)
+                .bind(is_staging)
+                .execute(api_db)
+                .await?;
+        }
     }
 
     info!("Creating new ACME account for {}", email);
