@@ -226,32 +226,63 @@ pub async fn run_acme_iteration(
         }
     }
 
+    let mut staging_managed = Vec::new();
+    let mut production_managed = Vec::new();
+
     for (hostname, is_staging) in managed_domains_to_certify {
-        info!("Processing managed certificate renewal for {}", hostname);
-
-        let account = if is_staging {
-            managed_staging_account.as_ref()
+        if is_staging {
+            staging_managed.push(hostname);
         } else {
-            managed_production_account.as_ref()
-        };
+            production_managed.push(hostname);
+        }
+    }
 
-        let result = if let Some(account) = account {
-            certify_managed_domain(
+    if !production_managed.is_empty()
+        && let Some(account) = managed_production_account.as_ref()
+    {
+        info!(
+            "Processing combined production managed certificate renewal for {:?}",
+            production_managed
+        );
+        if let Err(e) = certify_managed_domains_combined(
+            api_db,
+            nats,
+            account,
+            &production_managed,
+            false,
+            master_key,
+            router_addr,
+        )
+        .await
+        {
+            error!(
+                "Failed to certify combined production managed domains: {}",
+                e
+            );
+        }
+    }
+
+    for hostname in staging_managed {
+        info!(
+            "Processing managed certificate renewal for {} (staging)",
+            hostname
+        );
+        if let Some(account) = managed_staging_account.as_ref()
+            && let Err(e) = certify_managed_domain(
                 api_db,
                 nats,
                 account,
                 &hostname,
-                is_staging,
+                true,
                 master_key,
                 router_addr,
             )
             .await
-        } else {
-            Ok(())
-        };
-
-        if let Err(e) = result {
-            error!("Failed to certify managed domain {}: {}", hostname, e);
+        {
+            error!(
+                "Failed to certify staging managed domain {}: {}",
+                hostname, e
+            );
         }
     }
 
@@ -497,6 +528,196 @@ async fn certify_managed_domain(
     .bind(is_staging)
     .execute(api_db)
     .await?;
+
+    Ok(())
+}
+
+async fn certify_domain_multi(
+    api_db: &PgPool,
+    nats: &crate::nats::TypedNatsClient,
+    account: &Account,
+    hostnames: &[&str],
+    master_key: &str,
+    router_addr: &str,
+) -> anyhow::Result<DateTime<Utc>> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()?;
+
+    let identifiers: Vec<Identifier> = hostnames
+        .iter()
+        .map(|h| Identifier::Dns(h.to_string()))
+        .collect();
+
+    let mut order = account.new_order(&NewOrder::new(&identifiers)).await?;
+
+    let mut auths = order.authorizations();
+    let mut tokens = Vec::new();
+
+    while let Some(auth_result) = auths.next().await {
+        let mut auth_handle = auth_result?;
+        let auth_hostname = auth_handle.identifier().to_string();
+        if let Some(mut challenge_handle) = auth_handle.challenge(ChallengeType::Http01) {
+            let key_auth = challenge_handle.key_authorization().as_str().to_string();
+            let token = challenge_handle.token.clone();
+            tokens.push((token.clone(), auth_hostname.clone()));
+
+            let update = AcmeChallengeUpdate {
+                token: token.clone(),
+                key_auth: key_auth.clone(),
+                hostname: auth_hostname.clone(),
+                is_delete: false,
+                timestamp: chrono::Utc::now().timestamp(),
+            };
+
+            verify_challenge_is_live(
+                nats,
+                &client,
+                &auth_hostname,
+                &update,
+                &token,
+                &key_auth,
+                router_addr,
+            )
+            .await?;
+
+            // Trigger challenge
+            challenge_handle.set_ready().await?;
+        }
+    }
+
+    // Wait for order to be ready
+    let mut state = order.state();
+    let mut attempts = 0;
+    while matches!(
+        state.status,
+        OrderStatus::Pending | OrderStatus::Processing | OrderStatus::Ready
+    ) && attempts < 12
+    {
+        if state.status == OrderStatus::Ready {
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        state = order.refresh().await?;
+        attempts += 1;
+    }
+
+    // Cleanup challenges from router
+    for (token, _) in &tokens {
+        let update = AcmeChallengeUpdate {
+            token: token.clone(),
+            key_auth: "".into(),
+            hostname: "".into(),
+            is_delete: true,
+            timestamp: chrono::Utc::now().timestamp(),
+        };
+        if let Err(e) = nats
+            .publish(subjects::ROUTER_ACME_CHALLENGE_UPDATED, update)
+            .await
+        {
+            error!("Failed to publish challenge cleanup: {}", e);
+        }
+    }
+
+    if state.status != OrderStatus::Ready {
+        return Err(anyhow::anyhow!(
+            "ACME order failed with status: {:?} after {} attempts",
+            state.status,
+            attempts
+        ));
+    }
+
+    // Finalize order
+    let private_key_pem = order.finalize().await?;
+
+    // Wait for valid status
+    let mut state = order.refresh().await?;
+    attempts = 0;
+    while state.status == OrderStatus::Processing && attempts < 10 {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        state = order.refresh().await?;
+        attempts += 1;
+    }
+
+    if state.status != OrderStatus::Valid {
+        return Err(anyhow::anyhow!(
+            "ACME order finalization failed with status: {:?}",
+            state.status
+        ));
+    }
+
+    // Download certificate
+    let cert_chain_pem = order
+        .certificate()
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("No certificate returned"))?;
+
+    // Parse expiry
+    let expires_at = parse_expiry(&cert_chain_pem)?;
+
+    // Encrypt private key for storage
+    let encrypted_key = crate::crypto::encrypt(&private_key_pem, master_key)
+        .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
+
+    // Publish certificate to NATS for all hostnames
+    for hostname in hostnames {
+        // Update expiry in the API database for app-managed hostnames (if any are apps).
+        sqlx::query("UPDATE apps SET cert_expires_at = $1 WHERE hostname = $2")
+            .bind(expires_at)
+            .bind(hostname)
+            .execute(api_db)
+            .await?;
+
+        let update = TlsCertificateUpdate {
+            hostname: hostname.to_string(),
+            cert_chain: cert_chain_pem.clone(),
+            private_key: encrypted_key.clone(),
+            expires_at: expires_at.timestamp(),
+            timestamp: chrono::Utc::now().timestamp(),
+        };
+
+        nats.publish(subjects::ROUTER_TLS_CERT_UPDATED, update)
+            .await?;
+    }
+
+    info!(
+        "Successfully certified domains and published to NATS: {:?}",
+        hostnames
+    );
+
+    Ok(expires_at)
+}
+
+async fn certify_managed_domains_combined(
+    api_db: &PgPool,
+    nats: &crate::nats::TypedNatsClient,
+    account: &Account,
+    hostnames: &[String],
+    is_staging: bool,
+    master_key: &str,
+    router_addr: &str,
+) -> anyhow::Result<()> {
+    let hostnames_str: Vec<&str> = hostnames.iter().map(|s| s.as_str()).collect();
+    let expires_at = certify_domain_multi(
+        api_db,
+        nats,
+        account,
+        &hostnames_str,
+        master_key,
+        router_addr,
+    )
+    .await?;
+
+    for hostname in hostnames {
+        sqlx::query(
+            "INSERT INTO acme_managed_domains (hostname, cert_expires_at, is_staging, needs_reissue, updated_at) VALUES ($1, $2, $3, FALSE, NOW()) ON CONFLICT (hostname) DO UPDATE SET cert_expires_at = EXCLUDED.cert_expires_at, is_staging = EXCLUDED.is_staging, needs_reissue = FALSE, updated_at = NOW()",
+        )
+        .bind(hostname)
+        .bind(expires_at)
+        .bind(is_staging)
+        .execute(api_db)
+        .await?;
+    }
 
     Ok(())
 }
