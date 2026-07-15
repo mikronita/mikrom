@@ -2336,6 +2336,9 @@ dependencies = [
  "libc",
  "libgit2-sys",
  "log",
+ "openssl-probe 0.1.6",
+ "openssl-sys",
+ "url",
 ]
 
 [[package]]
@@ -3248,6 +3251,7 @@ dependencies = [
  "cc",
  "libc",
  "libz-sys",
+ "openssl-sys",
  "pkg-config",
 ]
 
@@ -3558,6 +3562,7 @@ dependencies = [
  "git2",
  "glob",
  "mikrom-proto",
+ "openssl",
  "prost 0.14.4",
  "serde",
  "serde_json",
