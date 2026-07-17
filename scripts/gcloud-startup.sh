@@ -44,10 +44,14 @@ mv release-${FC_VERSION}-${ARCH}/jailer-${FC_VERSION}-${ARCH} /usr/bin/jailer
 chmod +x /usr/bin/firecracker /usr/bin/jailer
 rm -rf release-${FC_VERSION}-${ARCH}
 
-# Descargar kernel de Firecracker
-echo "[*] Descargando kernel de Firecracker..."
+# Descargar kernel de Firecracker (dinámicamente desde el CI oficial de Firecracker en AWS S3)
+echo "[*] Resolviendo y descargando último kernel de Firecracker..."
 mkdir -p /opt/firecracker
-curl -fsSL -o /opt/firecracker/vmlinux.bin https://s3.amazonaws.com/spec.ccfc.min/img/hello/kernel/hello-vmlinux.bin
+ARCH="$(uname -m)"
+S3="https://s3.amazonaws.com/spec.ccfc.min"
+CI_ARTIFACTS_PREFIX=$(curl -fsSL "${S3}?list-type=2&prefix=firecracker-ci/&delimiter=/" | grep -oP "(?<=<Prefix>)firecracker-ci/[0-9]{8}-[^/]+/(?=</Prefix>)" | sort | tail -1)
+latest_kernel_key=$(curl -fsSL "${S3}?list-type=2&prefix=${CI_ARTIFACTS_PREFIX}${ARCH}/vmlinux-" | grep -oP "(?<=<Key>)(${CI_ARTIFACTS_PREFIX}${ARCH}/vmlinux-[0-9]+\.[0-9]+\.[0-9]{1,3})(?=</Key>)" | sort -V | tail -1)
+curl -fsSL -o /opt/firecracker/vmlinux.bin "${S3}/${latest_kernel_key}"
 
 
 # Instalar Cloud Hypervisor
