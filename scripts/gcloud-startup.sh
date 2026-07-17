@@ -44,6 +44,12 @@ mv release-${FC_VERSION}-${ARCH}/jailer-${FC_VERSION}-${ARCH} /usr/bin/jailer
 chmod +x /usr/bin/firecracker /usr/bin/jailer
 rm -rf release-${FC_VERSION}-${ARCH}
 
+# Descargar kernel de Firecracker
+echo "[*] Descargando kernel de Firecracker..."
+mkdir -p /opt/firecracker
+curl -fsSL -o /opt/firecracker/vmlinux.bin https://s3.amazonaws.com/spec.ccfc.min/img/hello/kernel/hello-vmlinux.bin
+
+
 # Instalar Cloud Hypervisor
 echo "[*] Descargando e instalando Cloud Hypervisor..."
 CH_VERSION="v42.0"
