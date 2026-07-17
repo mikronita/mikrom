@@ -21,7 +21,14 @@ RUN cargo build --release -p mikrom-builder && \
 FROM debian:trixie-slim AS runner
 WORKDIR /app
 # mikrom-builder needs docker to build images
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates docker.io git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    docker.io \
+    git \
+    curl \
+    postgresql-client \
+    && curl -sSL https://railpack.com/install.sh | sh -s -- --yes --bin-dir /usr/local/bin \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/mikrom-builder /usr/local/bin/
 # No ports needed for NATS-based builder
 CMD ["mikrom-builder"]

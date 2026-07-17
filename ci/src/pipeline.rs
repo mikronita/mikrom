@@ -156,6 +156,7 @@ impl MikromCi {
              export DEBIAN_FRONTEND=noninteractive; \
              apt-get update; \
              apt-get install -y --no-install-recommends {}; \
+             curl -sSL https://railpack.com/install.sh | sh -s -- --yes --bin-dir /usr/local/bin; \
              /usr/local/cargo/bin/rustup component add clippy rustfmt; \
              rm -rf /var/lib/apt/lists/*",
             BASE_PACKAGES.join(" ")

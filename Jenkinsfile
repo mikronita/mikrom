@@ -78,6 +78,7 @@ pipeline {
                         set -eux
                         export DEBIAN_FRONTEND=noninteractive
                         apt-get install -y --no-install-recommends docker.io
+                        curl -sSL https://railpack.com/install.sh | sh -s -- --yes --bin-dir /usr/local/bin
                         rm -rf /var/lib/apt/lists/*
                         rustup component add clippy rustfmt
                     "
