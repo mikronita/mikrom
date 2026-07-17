@@ -32,7 +32,7 @@ apt-get update
 apt-get install -y \
     curl git build-essential cmake pkg-config libssl-dev libelf-dev libbpf-dev \
     protobuf-compiler debootstrap wireguard-tools iptables iproute2 jq \
-    ca-certificates gnupg lsb-release librados-dev librbd-dev libcap2-bin
+    ca-certificates gnupg lsb-release librados-dev librbd-dev libcap2-bin postgresql-client
 
 # Instalar Firecracker y Jailer
 echo "[*] Descargando e instalando Firecracker y Jailer..."

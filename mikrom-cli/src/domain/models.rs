@@ -90,7 +90,7 @@ pub struct DeploymentInfo {
     pub image_tag: Option<String>,
     pub status: String,
     pub created_at: Option<String>,
-    pub hypervisor: Option<String>,
+    pub hypervisor: Option<i32>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
