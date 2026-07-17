@@ -92,6 +92,14 @@ ln -sf "/opt/zig-x86_64-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig
 echo "[*] Descargando e instalando Railpack..."
 curl -sSL https://railpack.com/install.sh | sh -s -- --yes --bin-dir /usr/local/bin
 
+# Instalar cliente de NATS (nats-cli)
+echo "[*] Descargando e instalando nats-cli..."
+NATS_CLI_VERSION="0.4.0"
+NATS_CLI_ARCH="$(dpkg --print-architecture)"
+curl -fsSL -o /tmp/nats-cli.deb "https://github.com/nats-io/natscli/releases/download/v${NATS_CLI_VERSION}/nats-${NATS_CLI_VERSION}-${NATS_CLI_ARCH}.deb"
+dpkg -i /tmp/nats-cli.deb
+rm -f /tmp/nats-cli.deb
+
 # 2. Clonar repositorio
 REPO_DIR="/opt/mikrom"
 
@@ -292,6 +300,7 @@ cat > /etc/mikrom/router.env <<EOF
 DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME_ROUTER}
 NATS_URL=nats://127.0.0.1:4222
 ROUTER_ID=router-1
+ADVERTISE_ADDRESS=127.0.0.1
 API_UPSTREAM_TARGETS=127.0.0.1:5001
 WEB_UPSTREAM_TARGETS=127.0.0.1:3001
 API_HOST=${API_DOMAIN}
