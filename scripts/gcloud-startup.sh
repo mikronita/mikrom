@@ -285,6 +285,7 @@ USE_TLS=false
 BRIDGE_IP=fd00::1/64
 FC_BASE_ROOTFS=/opt/firecracker/base-rootfs.ext4
 MIKROM_NAT64_DIR=/var/lib/mikrom-agent/nat64
+MIKROM_HOST_ID=node-1
 EOF
 
 cat > /etc/mikrom/router.env <<EOF
