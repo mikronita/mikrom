@@ -1,0 +1,66 @@
+---
+- name: Select NATS architecture
+  ansible.builtin.set_fact:
+    nats_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture] | default('') }}"
+
+- name: Require a supported NATS architecture
+  ansible.builtin.assert:
+    that: nats_arch | length > 0
+    fail_msg: "Unsupported NATS architecture: {{ ansible_facts.architecture }}"
+
+- name: Download NATS server archive
+  ansible.builtin.get_url:
+    url: >-
+      https://github.com/nats-io/nats-server/releases/download/v{{ mikrom_nats_version }}/nats-server-v{{ mikrom_nats_version }}-linux-{{ nats_arch }}.tar.gz
+    dest: "/tmp/nats-server-{{ mikrom_nats_version }}.tar.gz"
+    mode: '0644'
+
+- name: Extract NATS server
+  ansible.builtin.unarchive:
+    src: "/tmp/nats-server-{{ mikrom_nats_version }}.tar.gz"
+    dest: /tmp
+    remote_src: true
+    creates: "/tmp/nats-server-v{{ mikrom_nats_version }}-linux-{{ nats_arch }}/nats-server"
+
+- name: Install NATS server binary
+  ansible.builtin.copy:
+    src: "/tmp/nats-server-v{{ mikrom_nats_version }}-linux-{{ nats_arch }}/nats-server"
+    dest: /usr/local/bin/nats-server
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0755'
+  notify: Restart NATS
+
+- name: Create NATS user
+  ansible.builtin.user:
+    name: nats
+    system: true
+    home: /var/lib/nats
+    create_home: true
+    shell: /usr/sbin/nologin
+
+- name: Install NATS configuration
+  ansible.builtin.template:
+    src: nats-server.conf.j2
+    dest: /etc/nats-server.conf
+    owner: root
+    group: nats
+    mode: '0640'
+  notify: Restart NATS
+
+- name: Install NATS systemd unit
+  ansible.builtin.template:
+    src: nats-server.service.j2
+    dest: /etc/systemd/system/nats-server.service
+    mode: '0644'
+  notify:
+    - Reload systemd
+    - Restart NATS
+
+- name: Enable NATS
+  ansible.builtin.systemd_service:
+    name: nats-server
+    enabled: true
+    state: started
+    daemon_reload: true

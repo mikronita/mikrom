@@ -1,0 +1,105 @@
+---
+- name: Build mikrom-init
+  ansible.builtin.command:
+    cmd: zig build -Doptimize=ReleaseSafe
+    chdir: "{{ mikrom_install_dir }}/src/mikrom-init"
+  become: true
+  become_user: "{{ mikrom_build_user }}"
+  changed_when: true
+  listen: Rebuild Mikrom
+  environment:
+    PATH: "{{ mikrom_build_home }}/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
+
+- name: Create release staging directory
+  ansible.builtin.file:
+    path: "{{ mikrom_install_dir }}/src/target/release"
+    state: directory
+    owner: "{{ mikrom_build_user }}"
+    group: "{{ mikrom_build_user }}"
+    mode: '0755'
+  listen: Rebuild Mikrom
+
+- name: Stage mikrom-init
+  ansible.builtin.copy:
+    src: "{{ mikrom_install_dir }}/src/mikrom-init/zig-out/bin/mikrom-init"
+    dest: "{{ mikrom_install_dir }}/src/target/release/mikrom-init"
+    remote_src: true
+    owner: "{{ mikrom_build_user }}"
+    group: "{{ mikrom_build_user }}"
+    mode: '0755'
+  listen: Rebuild Mikrom
+
+- name: Configure tundra-nat64
+  ansible.builtin.command:
+    cmd: cmake -S tundra-nat64 -B target/tundra-build -DCMAKE_BUILD_TYPE=Release
+    chdir: "{{ mikrom_install_dir }}/src"
+  become: true
+  become_user: "{{ mikrom_build_user }}"
+  changed_when: true
+  listen: Rebuild Mikrom
+
+- name: Build tundra-nat64
+  ansible.builtin.command:
+    cmd: cmake --build target/tundra-build --parallel
+    chdir: "{{ mikrom_install_dir }}/src"
+  become: true
+  become_user: "{{ mikrom_build_user }}"
+  changed_when: true
+  listen: Rebuild Mikrom
+
+- name: Stage tundra-nat64
+  ansible.builtin.copy:
+    src: "{{ mikrom_install_dir }}/src/target/tundra-build/tundra-nat64"
+    dest: "{{ mikrom_install_dir }}/src/target/release/tundra-nat64"
+    remote_src: true
+    owner: "{{ mikrom_build_user }}"
+    group: "{{ mikrom_build_user }}"
+    mode: '0755'
+  listen: Rebuild Mikrom
+
+- name: Build Rust services
+  ansible.builtin.command:
+    cmd: >-
+      {{ mikrom_build_home }}/.cargo/bin/cargo build --release
+      -p mikrom-api -p mikrom-scheduler -p mikrom-builder
+      -p mikrom-agent -p mikrom-router -p mikrom-network -p mikrom-dns
+    chdir: "{{ mikrom_install_dir }}/src"
+  become: true
+  become_user: "{{ mikrom_build_user }}"
+  changed_when: true
+  listen: Rebuild Mikrom
+  environment:
+    PATH: "{{ mikrom_build_home }}/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
+
+- name: Install frontend dependencies
+  ansible.builtin.command:
+    cmd: pnpm install --frozen-lockfile
+    chdir: "{{ mikrom_install_dir }}/src/mikrom-app"
+  become: true
+  become_user: "{{ mikrom_build_user }}"
+  changed_when: true
+  listen: Rebuild Mikrom
+
+- name: Build frontend
+  ansible.builtin.command:
+    cmd: pnpm build
+    chdir: "{{ mikrom_install_dir }}/src/mikrom-app"
+  become: true
+  become_user: "{{ mikrom_build_user }}"
+  changed_when: true
+  listen: Rebuild Mikrom
+
+- name: Restart Mikrom services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: restarted
+  loop:
+    - mikrom-network
+    - mikrom-dns
+    - mikrom-api
+    - mikrom-scheduler
+    - mikrom-builder
+    - mikrom-router
+    - mikrom-agent
+    - mikrom-app
+  failed_when: false

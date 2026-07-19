@@ -1,0 +1,67 @@
+---
+- name: Define enabled Mikrom services
+  ansible.builtin.set_fact:
+    mikrom_services_definitions:
+      - { name: mikrom-network, enabled: "{{ mikrom_enable_network }}", env: network.env.j2 }
+      - { name: mikrom-dns, enabled: "{{ mikrom_enable_dns }}", env: dns.env.j2 }
+      - { name: mikrom-api, enabled: "{{ mikrom_enable_api }}", env: api.env.j2 }
+      - { name: mikrom-scheduler, enabled: "{{ mikrom_enable_scheduler }}", env: scheduler.env.j2 }
+      - { name: mikrom-builder, enabled: "{{ mikrom_enable_builder }}", env: builder.env.j2 }
+      - { name: mikrom-router, enabled: "{{ mikrom_enable_router }}", env: router.env.j2 }
+      - { name: mikrom-agent, enabled: "{{ mikrom_enable_agent }}", env: agent.env.j2 }
+      - { name: mikrom-app, enabled: "{{ mikrom_enable_app }}", env: app.env.j2 }
+
+- name: Install Firecracker and Cloud Hypervisor runtime
+  ansible.builtin.include_tasks: agent-runtime.yml
+  when: mikrom_enable_agent
+
+- name: Install service environment files
+  ansible.builtin.template:
+    src: "{{ item.env }}"
+    dest: "{{ mikrom_config_dir }}/{{ item.name }}.env"
+    owner: root
+    group: root
+    mode: '0600'
+  loop: "{{ mikrom_services_definitions }}"
+  when: item.enabled | bool
+  no_log: true
+  notify: Restart changed Mikrom service
+
+- name: Install Mikrom systemd units
+  ansible.builtin.template:
+    src: mikrom.service.j2
+    dest: "/etc/systemd/system/{{ item.name }}.service"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: "{{ mikrom_services_definitions }}"
+  when: item.enabled | bool
+  notify:
+    - Reload systemd
+    - Restart changed Mikrom service
+
+- name: Flush service configuration handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start Mikrom services
+  ansible.builtin.systemd_service:
+    name: "{{ item.name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop: "{{ mikrom_services_definitions }}"
+  when: item.enabled | bool
+
+- name: Gather service state
+  ansible.builtin.service_facts:
+
+- name: Disable services explicitly excluded from this host
+  ansible.builtin.systemd_service:
+    name: "{{ item.name }}"
+    enabled: false
+    state: stopped
+  loop: "{{ mikrom_services_definitions }}"
+  when:
+    - not (item.enabled | bool)
+    - ansible_facts.services[item.name + '.service'] is defined
+  failed_when: false

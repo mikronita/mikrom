@@ -1,0 +1,32 @@
+---
+- name: Install PostgreSQL from Debian trixie
+  ansible.builtin.apt:
+    name:
+      - postgresql
+      - postgresql-contrib
+    state: present
+
+- name: Enable PostgreSQL
+  ansible.builtin.systemd_service:
+    name: postgresql
+    enabled: true
+    state: started
+
+- name: Create Mikrom PostgreSQL role
+  community.postgresql.postgresql_user:
+    name: "{{ mikrom_postgres_user }}"
+    password: "{{ mikrom_postgres_password }}"
+    role_attr_flags: LOGIN
+  become: true
+  become_user: postgres
+  no_log: true
+
+- name: Create Mikrom databases
+  community.postgresql.postgresql_db:
+    name: "{{ item }}"
+    owner: "{{ mikrom_postgres_user }}"
+    encoding: UTF8
+    state: present
+  loop: "{{ mikrom_postgres_databases }}"
+  become: true
+  become_user: postgres

@@ -1,0 +1,139 @@
+---
+- name: Select build architecture
+  ansible.builtin.set_fact:
+    mikrom_build_release_arch: "{{ {'x86_64': 'x86_64', 'aarch64': 'aarch64'}[ansible_facts.architecture] | default('') }}"
+    mikrom_build_rust_target: "{{ {'x86_64': 'x86_64-unknown-linux-gnu', 'aarch64': 'aarch64-unknown-linux-gnu'}[ansible_facts.architecture] | default('') }}"
+
+- name: Require a supported build architecture
+  ansible.builtin.assert:
+    that:
+      - mikrom_build_release_arch | length > 0
+      - mikrom_build_rust_target | length > 0
+
+- name: Install Node.js and npm from Debian trixie
+  ansible.builtin.apt:
+    name:
+      - nodejs
+      - npm
+    state: present
+
+- name: Install pnpm
+  community.general.npm:
+    name: pnpm
+    version: "{{ mikrom_pnpm_version }}"
+    global: true
+
+- name: Check for Rust toolchain
+  ansible.builtin.stat:
+    path: "{{ mikrom_build_home }}/.cargo/bin/cargo"
+  register: mikrom_build_cargo
+
+- name: Download rustup installer
+  ansible.builtin.get_url:
+    url: "https://static.rust-lang.org/rustup/dist/{{ mikrom_build_rust_target }}/rustup-init"
+    dest: /tmp/rustup-init
+    mode: '0755'
+  when: not mikrom_build_cargo.stat.exists
+
+- name: Install stable Rust toolchain for {{ mikrom_build_user }}
+  ansible.builtin.command:
+    cmd: /tmp/rustup-init -y --profile minimal --default-toolchain stable
+    creates: "{{ mikrom_build_home }}/.cargo/bin/cargo"
+  become: true
+  become_user: "{{ mikrom_build_user }}"
+  when: not mikrom_build_cargo.stat.exists
+
+- name: Download Zig toolchain
+  ansible.builtin.get_url:
+    url: "https://ziglang.org/builds/zig-{{ mikrom_build_release_arch }}-linux-{{ mikrom_zig_version }}.tar.xz"
+    dest: "/tmp/zig-{{ mikrom_zig_version }}.tar.xz"
+    checksum: "sha256:{{ mikrom_zig_sha256 }}"
+    mode: '0644'
+
+- name: Extract Zig toolchain
+  ansible.builtin.unarchive:
+    src: "/tmp/zig-{{ mikrom_zig_version }}.tar.xz"
+    dest: /opt
+    remote_src: true
+    creates: "/opt/zig-{{ mikrom_build_release_arch }}-linux-{{ mikrom_zig_version }}/zig"
+
+- name: Link Zig toolchain
+  ansible.builtin.file:
+    src: "/opt/zig-{{ mikrom_build_release_arch }}-linux-{{ mikrom_zig_version }}/zig"
+    dest: /usr/local/bin/zig
+    state: link
+    force: true
+
+- name: Clone Mikrom repository
+  ansible.builtin.git:
+    repo: "{{ mikrom_repo_url }}"
+    dest: "{{ mikrom_install_dir }}/src"
+    version: "{{ mikrom_repo_version }}"
+    update: true
+    force: true
+    recursive: true
+  become: true
+  become_user: "{{ mikrom_build_user }}"
+  notify: Rebuild Mikrom
+
+- name: Check for compiled Mikrom API
+  ansible.builtin.stat:
+    path: "{{ mikrom_install_dir }}/src/target/release/mikrom-api"
+  register: mikrom_build_compiled_api
+
+- name: Request initial build when artifacts are absent
+  ansible.builtin.debug:
+    msg: Compiled artifacts are absent; building Mikrom.
+  changed_when: not mikrom_build_compiled_api.stat.exists
+  notify: Rebuild Mikrom
+
+- name: Flush build handler before installing binaries
+  ansible.builtin.meta: flush_handlers
+
+- name: Install Mikrom service binaries
+  ansible.builtin.copy:
+    src: "{{ mikrom_install_dir }}/src/target/release/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - mikrom-api
+    - mikrom-scheduler
+    - mikrom-builder
+    - mikrom-agent
+    - mikrom-router
+    - mikrom-network
+    - mikrom-dns
+  notify: Restart Mikrom services
+
+- name: Install guest init and NAT64 binaries
+  ansible.builtin.copy:
+    src: "{{ mikrom_install_dir }}/src/target/release/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - mikrom-init
+    - tundra-nat64
+
+- name: Install Railpack when a release URL is configured
+  ansible.builtin.get_url:
+    url: "{{ mikrom_railpack_url }}"
+    dest: /usr/local/bin/railpack
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - mikrom_enable_builder
+    - mikrom_railpack_url | length > 0
+
+- name: Warn when Railpack is not installed
+  ansible.builtin.debug:
+    msg: Set mikrom_railpack_url to enable builds for repositories without a Dockerfile.
+  when:
+    - mikrom_enable_builder
+    - mikrom_railpack_url | length == 0

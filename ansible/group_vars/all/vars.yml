@@ -1,0 +1,81 @@
+---
+# Replace the inventory address. Secrets live encrypted in group_vars/all/vault.yml.
+mikrom_repo_url: https://github.com/mikronita/mikrom.git
+mikrom_repo_version: main
+mikrom_install_dir: /opt/mikrom
+mikrom_config_dir: /etc/mikrom
+mikrom_data_dir: /var/lib/mikrom
+mikrom_runtime_user: root
+mikrom_runtime_group: root
+mikrom_build_user: root
+mikrom_build_home: /root
+
+mikrom_postgres_user: mikrom
+mikrom_postgres_password: "{{ vault_mikrom_postgres_password }}"
+mikrom_postgres_databases:
+  - mikrom_default
+  - mikrom_api
+  - mikrom_scheduler
+  - mikrom_router
+mikrom_jwt_secret: "{{ vault_mikrom_jwt_secret }}"
+mikrom_master_key: "{{ vault_mikrom_master_key }}"
+
+mikrom_nats_url: nats://127.0.0.1:4222
+mikrom_nats_version: 2.10.26
+mikrom_buildkit_version: 0.20.2
+mikrom_buildkit_host: tcp://127.0.0.1:1234
+mikrom_pnpm_version: 10
+mikrom_zig_version: 0.17.0-dev.1422+e863bf3be
+mikrom_zig_sha256: 029b14cd9bc84b30f7766c0ec568d214ca4ce36049749b78d9eb37bb6f4e28ce
+mikrom_railpack_url: ""
+
+mikrom_domain: mikrom.example.com
+mikrom_api_domain: api.mikrom.example.com
+mikrom_acme_email: admin@example.com
+mikrom_acme_staging: true
+mikrom_frontend_url: "https://{{ mikrom_domain }}"
+mikrom_app_host: 127.0.0.1
+mikrom_app_port: 3000
+
+mikrom_registry: registry.example.com/mikrom
+mikrom_registry_user: ""
+mikrom_registry_password: "{{ vault_mikrom_registry_password }}"
+
+# Polar billing. Empty values pass API startup validation; set real credentials
+# (ideally in vault.yml) to enable billing endpoints.
+mikrom_polar_access_token: ""
+mikrom_polar_webhook_secret: ""
+mikrom_polar_checkout_product_id: ""
+
+mikrom_host_id: node-1
+mikrom_bridge_ip: fd00::1/64
+mikrom_advertise_address: fd00::2
+mikrom_router_advertise_address: fd00::1
+mikrom_network_wg_port: 51823
+mikrom_router_wg_port: 51821
+
+mikrom_enable_postgresql: true
+mikrom_enable_nats: true
+mikrom_enable_buildkit: true
+mikrom_enable_docker: true
+mikrom_enable_network: true
+mikrom_enable_dns: true
+mikrom_enable_api: true
+mikrom_enable_scheduler: true
+mikrom_enable_builder: true
+mikrom_enable_router: true
+mikrom_enable_agent: true
+mikrom_enable_app: true
+
+# Optional VM artifacts. Empty URLs leave the directories ready for manual provisioning.
+mikrom_firecracker_version: 1.12.1
+mikrom_firecracker_url: ""
+mikrom_firecracker_kernel_url: ""
+mikrom_firecracker_rootfs_url: ""
+mikrom_cloud_hypervisor_version: "44.0"
+mikrom_cloud_hypervisor_url: ""
+mikrom_cloud_hypervisor_kernel_url: ""
+mikrom_cloud_hypervisor_rootfs_url: ""
+
+mikrom_enable_telemetry: false
+mikrom_otel_endpoint: http://127.0.0.1:4318

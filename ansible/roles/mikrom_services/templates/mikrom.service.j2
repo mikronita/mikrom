@@ -1,0 +1,25 @@
+[Unit]
+Description={{ item.name }}
+After=network-online.target nats-server.service postgresql.service docker.service buildkit.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ mikrom_runtime_user }}
+Group={{ mikrom_runtime_group }}
+EnvironmentFile={{ mikrom_config_dir }}/{{ item.name }}.env
+{% if item.name == 'mikrom-app' %}
+WorkingDirectory={{ mikrom_install_dir }}/src/mikrom-app
+ExecStart=/usr/bin/node build
+{% else %}
+ExecStart=/usr/local/bin/{{ item.name }}
+{% endif %}
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+{% if item.name == 'mikrom-agent' or item.name == 'mikrom-router' %}
+ExecStartPre=/usr/sbin/modprobe wireguard
+{% endif %}
+
+[Install]
+WantedBy=multi-user.target

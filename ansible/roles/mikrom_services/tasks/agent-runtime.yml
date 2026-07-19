@@ -1,0 +1,104 @@
+---
+- name: Check KVM device
+  ansible.builtin.stat:
+    path: /dev/kvm
+  register: mikrom_services_kvm_device
+
+- name: Warn when nested virtualization is unavailable
+  ansible.builtin.debug:
+    msg: /dev/kvm is unavailable; mikrom-agent can start but cannot launch microVMs.
+  when: not mikrom_services_kvm_device.stat.exists
+
+- name: Select hypervisor architecture
+  ansible.builtin.set_fact:
+    mikrom_services_hypervisor_arch: "{{ {'x86_64': 'x86_64', 'aarch64': 'aarch64'}[ansible_facts.architecture] | default('') }}"
+
+- name: Resolve Firecracker release directory
+  ansible.builtin.set_fact:
+    mikrom_services_fc_dir: "/tmp/release-v{{ mikrom_firecracker_version }}-{{ mikrom_services_hypervisor_arch }}"
+
+- name: Create hypervisor directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /opt/firecracker
+    - /opt/cloud-hypervisor
+    - /srv/jailer
+
+- name: Resolve Firecracker release URL
+  ansible.builtin.set_fact:
+    mikrom_services_firecracker_url: >-
+      {{ mikrom_firecracker_url if mikrom_firecracker_url | length > 0 else
+         'https://github.com/firecracker-microvm/firecracker/releases/download/v' + mikrom_firecracker_version +
+         '/firecracker-v' + mikrom_firecracker_version + '-' + mikrom_services_hypervisor_arch + '.tgz' }}
+  when: ansible_facts.architecture == 'x86_64'
+
+- name: Download Firecracker release
+  ansible.builtin.get_url:
+    url: "{{ mikrom_services_firecracker_url }}"
+    dest: "/tmp/firecracker-v{{ mikrom_firecracker_version }}.tgz"
+    mode: '0644'
+  when: ansible_facts.architecture == 'x86_64'
+
+- name: Extract Firecracker release
+  ansible.builtin.unarchive:
+    src: "/tmp/firecracker-v{{ mikrom_firecracker_version }}.tgz"
+    dest: /tmp
+    remote_src: true
+    creates: "{{ mikrom_services_fc_dir }}/firecracker-v{{ mikrom_firecracker_version }}-{{ mikrom_services_hypervisor_arch }}"
+  when: ansible_facts.architecture == 'x86_64'
+
+- name: Install Firecracker binaries
+  ansible.builtin.copy:
+    src: "{{ mikrom_services_fc_dir }}/{{ item }}-v{{ mikrom_firecracker_version }}-{{ mikrom_services_hypervisor_arch }}"
+    dest: "/usr/local/bin/{{ item }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - firecracker
+    - jailer
+  when: ansible_facts.architecture == 'x86_64'
+
+- name: Resolve Cloud Hypervisor release URL
+  ansible.builtin.set_fact:
+    mikrom_services_cloud_hypervisor_url: >-
+      {{ mikrom_cloud_hypervisor_url if mikrom_cloud_hypervisor_url | length > 0 else
+         'https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v' + mikrom_cloud_hypervisor_version +
+         '/cloud-hypervisor-static' }}
+
+- name: Install Cloud Hypervisor
+  ansible.builtin.get_url:
+    url: "{{ mikrom_services_cloud_hypervisor_url }}"
+    dest: /usr/local/bin/cloud-hypervisor
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Download configured guest VM artifacts
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - { url: "{{ mikrom_firecracker_kernel_url }}", dest: /opt/firecracker/vmlinux.bin }
+    - { url: "{{ mikrom_firecracker_rootfs_url }}", dest: /opt/firecracker/base-rootfs.ext4 }
+    - { url: "{{ mikrom_cloud_hypervisor_kernel_url }}", dest: /opt/cloud-hypervisor/vmlinux.bin }
+    - { url: "{{ mikrom_cloud_hypervisor_rootfs_url }}", dest: /opt/cloud-hypervisor/base-rootfs.ext4 }
+  when: item.url | length > 0
+
+- name: Warn when guest VM artifacts are not configured
+  ansible.builtin.debug:
+    msg: Configure the kernel/rootfs URL variables before deploying workloads with mikrom-agent.
+  when: >-
+    mikrom_firecracker_kernel_url | length == 0 or
+    mikrom_firecracker_rootfs_url | length == 0 or
+    mikrom_cloud_hypervisor_kernel_url | length == 0 or
+    mikrom_cloud_hypervisor_rootfs_url | length == 0

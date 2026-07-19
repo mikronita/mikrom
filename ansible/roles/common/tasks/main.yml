@@ -1,0 +1,62 @@
+---
+- name: Install system and build dependencies
+  ansible.builtin.apt:
+    name:
+      - build-essential
+      - ca-certificates
+      - clang
+      - cmake
+      - curl
+      - git
+      - gnupg
+      - iproute2
+      - iptables
+      - kmod
+      - libclang-dev
+      - librados-dev
+      - librbd-dev
+      - libssl-dev
+      - libseccomp-dev
+      - make
+      - pkg-config
+      - protobuf-compiler
+      - python3-psycopg2
+      - tar
+      - unzip
+      - wireguard-tools
+      - xz-utils
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create Mikrom directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ mikrom_config_dir }}", mode: '0750' }
+    - { path: "{{ mikrom_data_dir }}", mode: '0750' }
+    - { path: "{{ mikrom_data_dir }}/network", mode: '0750' }
+    - { path: "{{ mikrom_data_dir }}/agent", mode: '0750' }
+    - { path: "{{ mikrom_data_dir }}/router", mode: '0750' }
+    - { path: "{{ mikrom_install_dir }}", owner: "{{ mikrom_build_user }}", group: "{{ mikrom_build_user }}", mode: '0755' }
+    - { path: "{{ mikrom_install_dir }}/src", owner: "{{ mikrom_build_user }}", group: "{{ mikrom_build_user }}", mode: '0755' }
+
+- name: Enable IPv4 and IPv6 forwarding
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: '1'
+    state: present
+    sysctl_set: true
+    reload: true
+  loop:
+    - net.ipv4.ip_forward
+    - net.ipv6.conf.all.forwarding
+
+- name: Load WireGuard kernel module
+  community.general.modprobe:
+    name: wireguard
+    state: present

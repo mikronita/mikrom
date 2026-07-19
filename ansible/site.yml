@@ -1,0 +1,75 @@
+---
+- name: Install Mikrom all-in-one
+  hosts: mikrom
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Require Debian 13 trixie
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'Debian'
+          - ansible_facts.distribution_major_version == '13'
+          - ansible_facts.architecture == 'x86_64'
+        fail_msg: This playbook supports Debian 13 trixie on x86_64 only.
+      tags: always
+
+    - name: Require production secrets
+      ansible.builtin.assert:
+        that:
+          - not mikrom_postgres_password.startswith('CHANGE_ME')
+          - not mikrom_jwt_secret.startswith('CHANGE_ME')
+          - not mikrom_master_key.startswith('CHANGE_ME')
+          - mikrom_jwt_secret | length >= 32
+          - mikrom_master_key | length >= 32
+        fail_msg: Set the PostgreSQL, JWT and master-key variables, preferably with ansible-vault.
+      no_log: true
+      tags: always
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: postgresql
+      when: mikrom_enable_postgresql
+      tags: [postgresql]
+    - role: nats
+      when: mikrom_enable_nats
+      tags: [nats]
+    - role: buildkit
+      when: mikrom_enable_buildkit
+      tags: [buildkit]
+    - role: docker
+      when: mikrom_enable_docker
+      tags: [docker]
+    - role: mikrom_build
+      tags: [build]
+    - role: mikrom_services
+      tags: [services]
+
+  post_tasks:
+    - name: Wait for PostgreSQL
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 5432
+        timeout: 30
+      when: mikrom_enable_postgresql
+      tags: [verify]
+
+    - name: Wait for NATS
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 4222
+        timeout: 30
+      when: mikrom_enable_nats
+      tags: [verify]
+
+    - name: Wait for Mikrom API
+      ansible.builtin.uri:
+        url: http://127.0.0.1:5001/v1/health
+        status_code: 200
+      register: mikrom_api_health
+      retries: 12
+      delay: 5
+      until: mikrom_api_health.status == 200
+      when: mikrom_enable_api
+      tags: [verify]

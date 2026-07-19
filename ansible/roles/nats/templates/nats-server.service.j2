@@ -1,0 +1,16 @@
+[Unit]
+Description=NATS server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nats
+Group=nats
+ExecStart=/usr/local/bin/nats-server -c /etc/nats-server.conf
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=nats
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,6 @@
+# Never commit the vault password file
+.vault_pass
+.vault_pass.txt
+
+# Ansible retry files
+*.retry

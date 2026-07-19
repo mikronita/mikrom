@@ -1,0 +1,39 @@
+---
+- name: Select BuildKit architecture
+  ansible.builtin.set_fact:
+    buildkit_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture] | default('') }}"
+
+- name: Require a supported BuildKit architecture
+  ansible.builtin.assert:
+    that: buildkit_arch | length > 0
+
+- name: Download BuildKit
+  ansible.builtin.get_url:
+    url: >-
+      https://github.com/moby/buildkit/releases/download/v{{ mikrom_buildkit_version }}/buildkit-v{{ mikrom_buildkit_version }}.linux-{{ buildkit_arch }}.tar.gz
+    dest: "/tmp/buildkit-v{{ mikrom_buildkit_version }}.tar.gz"
+    mode: '0644'
+
+- name: Install BuildKit binaries
+  ansible.builtin.unarchive:
+    src: "/tmp/buildkit-v{{ mikrom_buildkit_version }}.tar.gz"
+    dest: /usr/local
+    remote_src: true
+    creates: /usr/local/bin/buildkitd
+  notify: Restart BuildKit
+
+- name: Install BuildKit systemd unit
+  ansible.builtin.template:
+    src: buildkit.service.j2
+    dest: /etc/systemd/system/buildkit.service
+    mode: '0644'
+  notify:
+    - Reload systemd
+    - Restart BuildKit
+
+- name: Enable BuildKit
+  ansible.builtin.systemd_service:
+    name: buildkit
+    enabled: true
+    state: started
+    daemon_reload: true

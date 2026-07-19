@@ -1,0 +1,11 @@
+---
+- name: Reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Restart changed Mikrom service
+  ansible.builtin.systemd_service:
+    name: "{{ item.name }}"
+    state: restarted
+  loop: "{{ mikrom_services_definitions }}"
+  when: item.enabled | bool
