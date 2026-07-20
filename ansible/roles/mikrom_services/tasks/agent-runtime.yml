@@ -41,6 +41,7 @@
   ansible.builtin.get_url:
     url: "{{ mikrom_services_firecracker_url }}"
     dest: "/tmp/firecracker-v{{ mikrom_firecracker_version }}.tgz"
+    checksum: "{{ 'sha256:' + mikrom_firecracker_sha256[ansible_facts.architecture] if mikrom_firecracker_sha256 | length > 0 else omit }}"
     mode: '0644'
   when: ansible_facts.architecture == 'x86_64'
 
@@ -76,6 +77,7 @@
   ansible.builtin.get_url:
     url: "{{ mikrom_services_cloud_hypervisor_url }}"
     dest: /usr/local/bin/cloud-hypervisor
+    checksum: "{{ 'sha256:' + mikrom_cloud_hypervisor_sha256 if mikrom_cloud_hypervisor_sha256 | length > 0 else omit }}"
     owner: root
     group: root
     mode: '0755'
@@ -84,14 +86,15 @@
   ansible.builtin.get_url:
     url: "{{ item.url }}"
     dest: "{{ item.dest }}"
+    checksum: "{{ 'sha256:' + item.sha256 if item.sha256 | length > 0 else omit }}"
     owner: root
     group: root
     mode: '0644'
   loop:
-    - { url: "{{ mikrom_firecracker_kernel_url }}", dest: /opt/firecracker/vmlinux.bin }
-    - { url: "{{ mikrom_firecracker_rootfs_url }}", dest: /opt/firecracker/base-rootfs.ext4 }
-    - { url: "{{ mikrom_cloud_hypervisor_kernel_url }}", dest: /opt/cloud-hypervisor/vmlinux.bin }
-    - { url: "{{ mikrom_cloud_hypervisor_rootfs_url }}", dest: /opt/cloud-hypervisor/base-rootfs.ext4 }
+    - { url: "{{ mikrom_firecracker_kernel_url }}", dest: /opt/firecracker/vmlinux.bin, sha256: "{{ mikrom_firecracker_kernel_sha256 }}" }
+    - { url: "{{ mikrom_firecracker_rootfs_url }}", dest: /opt/firecracker/base-rootfs.ext4, sha256: "{{ mikrom_firecracker_rootfs_sha256 }}" }
+    - { url: "{{ mikrom_cloud_hypervisor_kernel_url }}", dest: /opt/cloud-hypervisor/vmlinux.bin, sha256: "{{ mikrom_cloud_hypervisor_kernel_sha256 }}" }
+    - { url: "{{ mikrom_cloud_hypervisor_rootfs_url }}", dest: /opt/cloud-hypervisor/base-rootfs.ext4, sha256: "{{ mikrom_cloud_hypervisor_rootfs_sha256 }}" }
   when: item.url | length > 0
 
 - name: Warn when guest VM artifacts are not configured

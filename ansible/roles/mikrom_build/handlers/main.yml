@@ -91,15 +91,18 @@
 
 - name: Restart Mikrom services
   ansible.builtin.systemd_service:
-    name: "{{ item }}"
+    name: "{{ item.name }}"
     state: restarted
-  loop:
-    - mikrom-network
-    - mikrom-dns
-    - mikrom-api
-    - mikrom-scheduler
-    - mikrom-builder
-    - mikrom-router
-    - mikrom-agent
-    - mikrom-app
-  failed_when: false
+  loop: >-
+    {{
+      [
+        {'name': 'mikrom-network', 'enabled': mikrom_enable_network | bool},
+        {'name': 'mikrom-dns', 'enabled': mikrom_enable_dns | bool},
+        {'name': 'mikrom-api', 'enabled': mikrom_enable_api | bool},
+        {'name': 'mikrom-scheduler', 'enabled': mikrom_enable_scheduler | bool},
+        {'name': 'mikrom-builder', 'enabled': mikrom_enable_builder | bool},
+        {'name': 'mikrom-router', 'enabled': mikrom_enable_router | bool},
+        {'name': 'mikrom-agent', 'enabled': mikrom_enable_agent | bool},
+        {'name': 'mikrom-app', 'enabled': mikrom_enable_app | bool},
+      ] | selectattr('enabled') | list
+    }}

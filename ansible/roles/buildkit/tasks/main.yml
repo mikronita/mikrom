@@ -12,6 +12,7 @@
     url: >-
       https://github.com/moby/buildkit/releases/download/v{{ mikrom_buildkit_version }}/buildkit-v{{ mikrom_buildkit_version }}.linux-{{ buildkit_arch }}.tar.gz
     dest: "/tmp/buildkit-v{{ mikrom_buildkit_version }}.tar.gz"
+    checksum: "sha256:{{ mikrom_buildkit_sha256[ansible_facts.architecture] }}"
     mode: '0644'
 
 - name: Install BuildKit binaries
@@ -28,7 +29,7 @@
     dest: /etc/systemd/system/buildkit.service
     mode: '0644'
   notify:
-    - Reload systemd
+    - Reload systemd (buildkit)
     - Restart BuildKit
 
 - name: Enable BuildKit

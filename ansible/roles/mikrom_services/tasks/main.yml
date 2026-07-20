@@ -15,6 +15,10 @@
   ansible.builtin.include_tasks: agent-runtime.yml
   when: mikrom_enable_agent
 
+# Note: no_log is intentionally not set here. The template module only logs
+# file metadata (path, checksum, mode), and the registered per-item changed
+# flags are required below to restart only the services that actually changed.
+# Avoid running with --diff if leaking env file contents is a concern.
 - name: Install service environment files
   ansible.builtin.template:
     src: "{{ item.env }}"
@@ -24,8 +28,7 @@
     mode: '0600'
   loop: "{{ mikrom_services_definitions }}"
   when: item.enabled | bool
-  no_log: true
-  notify: Restart changed Mikrom service
+  register: mikrom_services_env
 
 - name: Install Mikrom systemd units
   ansible.builtin.template:
@@ -36,12 +39,27 @@
     mode: '0644'
   loop: "{{ mikrom_services_definitions }}"
   when: item.enabled | bool
-  notify:
-    - Reload systemd
-    - Restart changed Mikrom service
+  register: mikrom_services_units
 
-- name: Flush service configuration handlers
-  ansible.builtin.meta: flush_handlers
+- name: Collect services with changed configuration
+  ansible.builtin.set_fact:
+    mikrom_services_changed: >-
+      {{
+        (
+          mikrom_services_env.results | default([]) | selectattr('changed') | map(attribute='item.name')
+          + mikrom_services_units.results | default([]) | selectattr('changed') | map(attribute='item.name')
+        ) | unique | list
+      }}
+
+# daemon_reload runs before the restart, so unit file changes are picked up
+# exactly for the services that changed. With no changes the loop is empty
+# and no reload or restart happens at all.
+- name: Restart changed Mikrom services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: restarted
+    daemon_reload: true
+  loop: "{{ mikrom_services_changed }}"
 
 - name: Enable and start Mikrom services
   ansible.builtin.systemd_service:

@@ -13,6 +13,7 @@
     url: >-
       https://github.com/nats-io/nats-server/releases/download/v{{ mikrom_nats_version }}/nats-server-v{{ mikrom_nats_version }}-linux-{{ nats_arch }}.tar.gz
     dest: "/tmp/nats-server-{{ mikrom_nats_version }}.tar.gz"
+    checksum: "sha256:{{ mikrom_nats_sha256[ansible_facts.architecture] }}"
     mode: '0644'
 
 - name: Extract NATS server
@@ -55,7 +56,7 @@
     dest: /etc/systemd/system/nats-server.service
     mode: '0644'
   notify:
-    - Reload systemd
+    - Reload systemd (nats)
     - Restart NATS
 
 - name: Enable NATS

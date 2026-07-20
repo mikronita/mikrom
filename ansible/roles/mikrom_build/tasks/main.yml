@@ -133,7 +133,9 @@
 - name: Download Railpack
   ansible.builtin.get_url:
     url: >-
-      https://github.com/railwayapp/railpack/releases/download/v{{ mikrom_railpack_version }}/railpack-v{{ mikrom_railpack_version }}-{{ mikrom_build_railpack_arch }}-unknown-linux-musl.tar.gz
+      {{ 'https://github.com/railwayapp/railpack/releases/download/v' + mikrom_railpack_version +
+         '/railpack-v' + mikrom_railpack_version + '-' + mikrom_build_railpack_arch +
+         '-unknown-linux-musl.tar.gz' }}
     dest: "/tmp/railpack-v{{ mikrom_railpack_version }}.tar.gz"
     checksum: "sha256:{{ mikrom_railpack_sha256[ansible_facts.architecture] }}"
     mode: '0644'
