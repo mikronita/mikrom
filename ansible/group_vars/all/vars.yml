@@ -27,7 +27,10 @@ mikrom_buildkit_host: tcp://127.0.0.1:1234
 mikrom_pnpm_version: 10
 mikrom_zig_version: 0.17.0-dev.1422+e863bf3be
 mikrom_zig_sha256: 029b14cd9bc84b30f7766c0ec568d214ca4ce36049749b78d9eb37bb6f4e28ce
-mikrom_railpack_url: ""
+mikrom_railpack_version: 0.31.1
+mikrom_railpack_sha256:
+  x86_64: 606403d40d7229e205554e0dba6bdaf8922308fa6447182dfc33dcc338a47a80
+  aarch64: 0c4418d56877d67351f0853278235c003d2d94f8b3e58f4ca85ecb51bd07e851
 
 mikrom_domain: mikrom.example.com
 mikrom_api_domain: api.mikrom.example.com

@@ -120,20 +120,46 @@
     - mikrom-init
     - tundra-nat64
 
-- name: Install Railpack when a release URL is configured
+- name: Select Railpack architecture
+  ansible.builtin.set_fact:
+    mikrom_build_railpack_arch: "{{ {'x86_64': 'x86_64', 'aarch64': 'arm64'}[ansible_facts.architecture] | default('') }}"
+  when: mikrom_enable_builder
+
+- name: Require a supported Railpack architecture
+  ansible.builtin.assert:
+    that: mikrom_build_railpack_arch | length > 0
+  when: mikrom_enable_builder
+
+- name: Download Railpack
   ansible.builtin.get_url:
-    url: "{{ mikrom_railpack_url }}"
+    url: >-
+      https://github.com/railwayapp/railpack/releases/download/v{{ mikrom_railpack_version }}/railpack-v{{ mikrom_railpack_version }}-{{ mikrom_build_railpack_arch }}-unknown-linux-musl.tar.gz
+    dest: "/tmp/railpack-v{{ mikrom_railpack_version }}.tar.gz"
+    checksum: "sha256:{{ mikrom_railpack_sha256[ansible_facts.architecture] }}"
+    mode: '0644'
+  when: mikrom_enable_builder
+
+- name: Create Railpack extraction directory
+  ansible.builtin.file:
+    path: "/tmp/railpack-v{{ mikrom_railpack_version }}"
+    state: directory
+    mode: '0755'
+  when: mikrom_enable_builder
+
+- name: Extract Railpack
+  ansible.builtin.unarchive:
+    src: "/tmp/railpack-v{{ mikrom_railpack_version }}.tar.gz"
+    dest: "/tmp/railpack-v{{ mikrom_railpack_version }}"
+    remote_src: true
+    creates: "/tmp/railpack-v{{ mikrom_railpack_version }}/railpack"
+  when: mikrom_enable_builder
+
+- name: Install Railpack binary
+  ansible.builtin.copy:
+    src: "/tmp/railpack-v{{ mikrom_railpack_version }}/railpack"
     dest: /usr/local/bin/railpack
+    remote_src: true
     owner: root
     group: root
     mode: '0755'
-  when:
-    - mikrom_enable_builder
-    - mikrom_railpack_url | length > 0
-
-- name: Warn when Railpack is not installed
-  ansible.builtin.debug:
-    msg: Set mikrom_railpack_url to enable builds for repositories without a Dockerfile.
-  when:
-    - mikrom_enable_builder
-    - mikrom_railpack_url | length == 0
+  when: mikrom_enable_builder
