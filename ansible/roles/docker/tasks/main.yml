@@ -4,6 +4,15 @@
     name: docker.io
     state: present
 
+- name: Configure Docker daemon
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Docker
+
 - name: Enable Docker engine
   ansible.builtin.systemd_service:
     name: docker

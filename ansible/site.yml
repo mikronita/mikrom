@@ -41,6 +41,9 @@
     - role: docker
       when: mikrom_enable_docker
       tags: [docker]
+    - role: registry
+      when: mikrom_enable_registry
+      tags: [registry]
     - role: mikrom_build
       tags: [build]
     - role: mikrom_services

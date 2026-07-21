@@ -1,0 +1,3 @@
+{
+  "insecure-registries": {{ (mikrom_registry_insecure | bool) | ternary([mikrom_registry_host ~ ':' ~ mikrom_registry_port], []) | to_json }}
+}

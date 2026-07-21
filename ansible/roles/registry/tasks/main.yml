@@ -1,0 +1,14 @@
+---
+- name: Install Docker Python SDK
+  ansible.builtin.apt:
+    name: python3-docker
+    state: present
+
+- name: Run local OCI registry
+  community.docker.docker_container:
+    name: registry
+    image: registry:2
+    state: started
+    restart_policy: always
+    published_ports:
+      - "{{ mikrom_registry_port }}:5000"

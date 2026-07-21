@@ -51,7 +51,13 @@ mikrom_frontend_url: "https://{{ mikrom_domain }}"
 mikrom_app_host: 127.0.0.1
 mikrom_app_port: 3000
 
-mikrom_registry: registry.example.com/mikrom
+# Local OCI registry running as a Docker container on the Mikrom host itself.
+# The builder pushes images here and the agent pulls them, both without TLS
+# (see the docker role's insecure-registries configuration).
+mikrom_registry_host: "{{ ansible_host | default(inventory_hostname) }}"
+mikrom_registry_port: 5000
+mikrom_registry_insecure: true
+mikrom_registry: "{{ mikrom_registry_host }}:{{ mikrom_registry_port }}/mikrom"
 mikrom_registry_user: ""
 mikrom_registry_password: "{{ vault_mikrom_registry_password }}"
 
@@ -72,6 +78,7 @@ mikrom_enable_postgresql: true
 mikrom_enable_nats: true
 mikrom_enable_buildkit: true
 mikrom_enable_docker: true
+mikrom_enable_registry: true
 mikrom_enable_network: true
 mikrom_enable_dns: true
 mikrom_enable_api: true
