@@ -99,14 +99,14 @@ mikrom_firecracker_url: ""
 mikrom_firecracker_sha256:
   x86_64: 0a75e67ef6e4c540a2cf248b06822b0be9820cbba9fe19f9e0321200fe76ff6b
   aarch64: 785bc9d30756bff0c03fb275baac957363f9ba98f78a2272405dcb6929ebb953
-mikrom_firecracker_kernel_url: ""
+mikrom_firecracker_kernel_url: "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.15/x86_64/vmlinux-6.1.155"
 mikrom_firecracker_kernel_sha256: ""
 mikrom_firecracker_rootfs_url: ""
 mikrom_firecracker_rootfs_sha256: ""
 mikrom_cloud_hypervisor_version: "44.0"
 mikrom_cloud_hypervisor_url: ""
 mikrom_cloud_hypervisor_sha256: f58e5d8684a5cbd7c4b8a001a1188ac79b9d4dda8115e1b3d5faa8c29038119c
-mikrom_cloud_hypervisor_kernel_url: ""
+mikrom_cloud_hypervisor_kernel_url: "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.15/x86_64/vmlinux-6.1.155"
 mikrom_cloud_hypervisor_kernel_sha256: ""
 mikrom_cloud_hypervisor_rootfs_url: ""
 mikrom_cloud_hypervisor_rootfs_sha256: ""

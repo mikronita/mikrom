@@ -17,6 +17,15 @@
   ansible.builtin.set_fact:
     mikrom_services_fc_dir: "/tmp/release-v{{ mikrom_firecracker_version }}-{{ mikrom_services_hypervisor_arch }}"
 
+- name: Install rootfs build dependencies
+  ansible.builtin.apt:
+    name:
+      - debootstrap
+      - e2fsprogs
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
 - name: Create hypervisor directories
   ansible.builtin.file:
     path: "{{ item }}"
@@ -105,3 +114,12 @@
     mikrom_firecracker_rootfs_url | length == 0 or
     mikrom_cloud_hypervisor_kernel_url | length == 0 or
     mikrom_cloud_hypervisor_rootfs_url | length == 0
+
+- name: Build base rootfs from the cloned repository
+  ansible.builtin.command:
+    cmd: "{{ mikrom_install_dir }}/src/scripts/build-base-rootfs.sh"
+    creates: /opt/firecracker/base-rootfs.ext4
+  environment:
+    OUTPUT_DIR: /opt/firecracker
+    DEBIAN_RELEASE: trixie
+  when: mikrom_firecracker_rootfs_url | length == 0

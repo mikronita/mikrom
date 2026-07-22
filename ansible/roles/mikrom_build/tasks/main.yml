@@ -111,7 +111,7 @@
 - name: Install guest init and NAT64 binaries
   ansible.builtin.copy:
     src: "{{ mikrom_install_dir }}/src/target/release/{{ item }}"
-    dest: "/usr/local/bin/{{ item }}"
+    dest: "{{ '/usr/local/bin/' + item if item == 'tundra-nat64' else '/usr/bin/' + item }}"
     remote_src: true
     owner: root
     group: root
