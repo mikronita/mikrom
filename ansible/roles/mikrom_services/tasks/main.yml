@@ -19,6 +19,15 @@
 # file metadata (path, checksum, mode), and the registered per-item changed
 # flags are required below to restart only the services that actually changed.
 # Avoid running with --diff if leaking env file contents is a concern.
+- name: Ensure avatar upload directory exists
+  ansible.builtin.file:
+    path: "{{ mikrom_data_dir }}/data/v1/uploads/avatars"
+    state: directory
+    owner: "{{ mikrom_runtime_user }}"
+    group: "{{ mikrom_runtime_group }}"
+    mode: '0755'
+  when: mikrom_enable_api | bool
+
 - name: Install service environment files
   ansible.builtin.template:
     src: "{{ item.env }}"

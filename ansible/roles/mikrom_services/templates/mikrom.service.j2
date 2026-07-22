@@ -11,6 +11,9 @@ EnvironmentFile={{ mikrom_config_dir }}/{{ item.name }}.env
 {% if item.name == 'mikrom-app' %}
 WorkingDirectory={{ mikrom_install_dir }}/src/mikrom-app
 ExecStart=/usr/bin/node build
+{% elif item.name == 'mikrom-api' %}
+WorkingDirectory={{ mikrom_data_dir }}
+ExecStart=/usr/local/bin/{{ item.name }}
 {% else %}
 ExecStart=/usr/local/bin/{{ item.name }}
 {% endif %}

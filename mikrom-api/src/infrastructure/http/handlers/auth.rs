@@ -99,7 +99,8 @@ pub struct UpdateProfileRequest {
 }
 
 fn avatar_storage_dir() -> PathBuf {
-    PathBuf::from("./data/v1/uploads/avatars")
+    PathBuf::from(std::env::var("MIKROM_DATA_DIR").unwrap_or_else(|_| "./data".to_string()))
+        .join("v1/uploads/avatars")
 }
 
 fn public_avatar_url(filename: &str) -> String {

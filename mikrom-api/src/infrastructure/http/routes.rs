@@ -455,7 +455,8 @@ pub fn create_app_with_rate_limits(
         .with_swagger(crate::SWAGGER_PATH)
         .finish();
 
-    let static_routes = axum::Router::new().fallback_service(ServeDir::new("./data"));
+    let data_dir = std::env::var("MIKROM_DATA_DIR").unwrap_or_else(|_| "./data".to_string());
+    let static_routes = axum::Router::new().fallback_service(ServeDir::new(data_dir));
 
     public_routes
         .merge(protected_routes_layered)
