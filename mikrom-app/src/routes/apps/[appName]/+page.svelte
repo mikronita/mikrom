@@ -96,6 +96,19 @@
   let showDeployModal = $state(false);
   let showPortModal = $state(false);
   let showLogsModal = $state(false);
+
+  async function refreshDeployments() {
+    const token = getToken();
+    if (!token) return;
+    const name = decodeURIComponent($page.params.appName ?? "");
+    if (!name) return;
+    const result = await listDeployments(token, name);
+    if (result.data) {
+      deployments = sortDeployments(
+        result.data.map((dep) => normalizeDeployment(dep)),
+      );
+    }
+  }
   let showDeleteAppDialog = $state(false);
   let deletingApp = $state(false);
   let activatingDeploymentId = $state<string | null>(null);
@@ -221,7 +234,7 @@
       if (cleanupMetrics) cleanupMetrics();
       if (cleanupLogs) cleanupLogs();
 
-      cleanupDeployments = watchDeploymentsSSE(token, (deployment) => {
+          cleanupDeployments = watchDeploymentsSSE(token, (deployment) => {
         if (deployment.app_name !== currentAppName) return;
 
         const depId =
@@ -321,6 +334,7 @@
     }
 
     if (activeTab === "deployments") {
+      void refreshDeployments();
       void refreshApps();
       return;
     }
@@ -453,6 +467,11 @@
   let appUpdatedAt = $derived(
     app?.updated_at || app?.created_at ? formatDate(app?.updated_at || app?.created_at || new Date()) : null,
   );
+
+  function onDeploy() {
+    activeTab = "deployments";
+    refreshDeployments();
+  }
 
   $effect(() => {
     if (appScaleState === "scaled_to_zero" || runningReplicaCount === 0) {
@@ -1159,7 +1178,7 @@
   {/if}
 
   {#if app && showDeployModal}
-    <DeployAppModal bind:open={showDeployModal} app={app!} />
+    <DeployAppModal bind:open={showDeployModal} app={app!} ondeploy={onDeploy} />
   {/if}
 
   <AlertDialog

@@ -25,9 +25,11 @@
   let {
     open = $bindable(false),
     app,
+    ondeploy,
   } = $props<{
     open?: boolean;
     app: AppInfo;
+    ondeploy?: () => void;
   }>();
 
   const DEFAULT_CPU = String(DEPLOYMENT_CPU_OPTIONS[0]);
@@ -80,6 +82,7 @@
 
       toast.success(`Deployment for ${app.name} initiated`);
       close();
+      ondeploy?.();
     } finally {
       loading = false;
     }
