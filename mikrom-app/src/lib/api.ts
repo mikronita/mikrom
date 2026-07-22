@@ -525,6 +525,7 @@ export interface Volume {
   user_id: string;
   name: string;
   size_mib: number;
+  pool_name: string;
   created_at: string;
   updated_at: string;
 }

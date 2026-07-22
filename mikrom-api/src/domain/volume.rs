@@ -46,7 +46,7 @@ pub struct Volume {
     pub tenant_id: Uuid,
     pub name: String,
     pub size_mib: i32,
-    #[serde(skip_serializing)]
+    #[serde(default)]
     pub pool_name: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

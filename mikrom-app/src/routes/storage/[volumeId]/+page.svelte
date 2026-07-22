@@ -8,7 +8,6 @@
   import History from "@lucide/svelte/icons/history";
   import Camera from "@lucide/svelte/icons/camera";
   import Link from "@lucide/svelte/icons/link";
-  import Activity from "@lucide/svelte/icons/activity";
   import Server from "@lucide/svelte/icons/server";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Zap from "@lucide/svelte/icons/zap";
@@ -73,7 +72,7 @@
   $: isAttached = attachmentCount > 0;
   $: volumeStatusLabel = isAttached ? "Attached" : "Available";
   $: volumeUpdatedAt = "updated_at" in (volume || {}) ? (volume as AttachedVolume | VolumeWithAttachments).updated_at : volume?.created_at || "";
-  $: volumePoolName = volume && "pool_name" in volume ? volume.pool_name : "ceph-rbd-ssd";
+  $: volumePoolName = volume?.pool_name ?? "";
 
   let activeTab: "overview" | "snapshots" | "settings" = "overview";
   const volumeTabs = [
@@ -332,8 +331,8 @@
                   </div>
                 </div>
                 <div class="rounded-2xl border border-border/70 bg-background/60 p-4">
-                  <p class="text-xs text-muted-foreground">Replication</p>
-                  <p class="mt-2 text-sm font-medium">3x replicated</p>
+                  <p class="text-xs text-muted-foreground">Created</p>
+                  <p class="mt-2 text-sm font-medium">{formatDate(volume.created_at)}</p>
                 </div>
                 <div class="rounded-2xl border border-border/70 bg-background/60 p-4">
                   <p class="text-xs text-muted-foreground">Updated</p>
@@ -403,8 +402,8 @@
                     <Database class="size-5" />
                   </div>
                   <div class="flex flex-col">
-                    <span class="text-sm font-medium">ceph-rbd-ssd</span>
-                    <span class="text-xs text-muted-foreground">High Performance</span>
+                    <span class="text-sm font-medium">{volumePoolName}</span>
+                    <span class="text-xs text-muted-foreground">Ceph RBD</span>
                   </div>
                 </div>
               </CardContent>
@@ -415,23 +414,13 @@
                 <CardTitle class="text-base">Usage Stats</CardTitle>
               </CardHeader>
               <CardContent class="grid gap-4">
-                <div class="flex flex-col gap-2">
-                  <div class="flex items-center justify-between text-xs">
-                    <span class="text-muted-foreground">Provisioned</span>
-                    <span class="font-medium">{volume.size_mib} MiB</span>
-                  </div>
-                  <div class="h-2 w-full rounded-full bg-muted">
-                    <div class="h-full w-[45%] rounded-full bg-primary"></div>
-                  </div>
-                  <div class="flex items-center justify-between text-[10px] text-muted-foreground">
-                    <span>Used: ~460 MiB</span>
-                    <span>Free: ~564 MiB</span>
-                  </div>
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-muted-foreground">Provisioned</span>
+                  <span class="font-medium">{volume.size_mib} MiB</span>
                 </div>
-                <div class="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Activity class="size-3" />
-                  <span>I/O is healthy</span>
-                </div>
+                <p class="text-xs text-muted-foreground">
+                  Live usage metrics are not exposed by the storage backend yet.
+                </p>
               </CardContent>
             </Card>
           </div>
