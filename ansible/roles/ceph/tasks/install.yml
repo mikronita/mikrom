@@ -1,0 +1,14 @@
+---
+- name: Install Ceph services from Debian trixie
+  ansible.builtin.apt:
+    name:
+      - ceph-common
+      - ceph-mds
+      - ceph-mgr
+      - ceph-mon
+      - ceph-osd
+      - ceph-volume
+      - lvm2
+    state: present
+    update_cache: true
+    cache_valid_time: 3600

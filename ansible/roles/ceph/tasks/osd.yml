@@ -1,0 +1,30 @@
+---
+- name: Inspect OSD devices
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ ceph_osd_devices }}"
+  register: ceph_osd_device_stats
+
+- name: Require block devices for OSDs
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isblk
+    fail_msg: "OSD device {{ item.item }} is missing or is not a block device."
+  loop: "{{ ceph_osd_device_stats.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: List existing ceph-volume LVM deployments
+  ansible.builtin.command: ceph-volume lvm list --format json
+  register: ceph_volume_lvm_list
+  changed_when: false
+
+# DESTRUCTIVE on first run: ceph-volume wipes every listed device and turns it
+# into a BlueStore OSD. The list guard keeps re-runs idempotent.
+- name: Create BlueStore OSDs on the dedicated devices
+  ansible.builtin.command: ceph-volume lvm create --data "{{ item }}"
+  loop: "{{ ceph_osd_devices }}"
+  when: item not in ceph_volume_lvm_list.stdout
+  loop_control:
+    label: "{{ item }}"

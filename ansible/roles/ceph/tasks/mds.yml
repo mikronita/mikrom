@@ -1,0 +1,71 @@
+---
+- name: Create the metadata server data directory
+  ansible.builtin.file:
+    path: "/var/lib/ceph/mds/{{ ceph_cluster_name }}-{{ ansible_facts.hostname }}"
+    state: directory
+    owner: ceph
+    group: ceph
+    mode: '0750'
+
+- name: Create the metadata server keyring
+  ansible.builtin.command:
+    cmd: >-
+      ceph auth get-or-create mds.{{ ansible_facts.hostname }}
+      mon 'allow profile mds' osd 'allow rwx' mds 'allow' mgr 'allow profile mds'
+      -o /var/lib/ceph/mds/{{ ceph_cluster_name }}-{{ ansible_facts.hostname }}/keyring
+    creates: /var/lib/ceph/mds/{{ ceph_cluster_name }}-{{ ansible_facts.hostname }}/keyring
+  no_log: true
+
+- name: Secure the metadata server keyring
+  ansible.builtin.file:
+    path: "/var/lib/ceph/mds/{{ ceph_cluster_name }}-{{ ansible_facts.hostname }}/keyring"
+    owner: ceph
+    group: ceph
+    mode: '0600'
+  no_log: true
+
+- name: Enable the Ceph metadata server
+  ansible.builtin.systemd_service:
+    name: "ceph-mds@{{ ansible_facts.hostname }}"
+    enabled: true
+    state: started
+
+- name: List existing Ceph filesystems
+  ansible.builtin.command: ceph fs ls --format json
+  register: ceph_fs_list
+  changed_when: false
+
+- name: Detect whether the CephFS filesystem is missing
+  ansible.builtin.set_fact:
+    ceph_fs_missing: >-
+      {{ ceph_fs_list.stdout | from_json | selectattr('name', 'equalto', ceph_fs_name) | list | count == 0 }}
+
+- name: Create the CephFS metadata pool
+  ansible.builtin.command: ceph osd pool create {{ ceph_fs_name }}_metadata
+  when: ceph_fs_missing | bool
+
+- name: Create the CephFS data pool
+  ansible.builtin.command: ceph osd pool create {{ ceph_fs_name }}_data
+  when: ceph_fs_missing | bool
+
+- name: Create the CephFS filesystem
+  ansible.builtin.command: ceph fs new {{ ceph_fs_name }} {{ ceph_fs_name }}_metadata {{ ceph_fs_name }}_data
+  when: ceph_fs_missing | bool
+
+# The agent kernel-mounts <mon>:/volumes/<volume_id>, so the /volumes root must
+# exist in the filesystem. A throwaway mount creates it; the msgr1 port keeps
+# the mount compatible with any kernel client.
+- name: Ensure the /volumes root directory exists in CephFS
+  ansible.builtin.shell: |
+    set -e
+    mkdir -p /mnt/cephfs-bootstrap
+    if ! mountpoint -q /mnt/cephfs-bootstrap; then
+      mount -t ceph {{ ceph_mon_address }}:6789:/ /mnt/cephfs-bootstrap -o name=admin,secretfile=/etc/ceph/admin.secret
+    fi
+    mkdir -p /mnt/cephfs-bootstrap/volumes
+    umount /mnt/cephfs-bootstrap
+    rmdir /mnt/cephfs-bootstrap
+  register: cephfs_volumes_dir
+  retries: 6
+  delay: 5
+  until: cephfs_volumes_dir.rc == 0

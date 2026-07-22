@@ -1,0 +1,143 @@
+---
+- name: Deploy the Ceph storage cluster
+  hosts: ceph
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Require Debian 13 trixie
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'Debian'
+          - ansible_facts.distribution_major_version == '13'
+          - ansible_facts.architecture == 'x86_64'
+        fail_msg: This playbook supports Debian 13 trixie on x86_64 only.
+      tags: always
+
+  roles:
+    - role: ceph
+      tags: [ceph]
+
+  post_tasks:
+    - name: Wait for Ceph cluster health
+      ansible.builtin.command: ceph health
+      register: ceph_health
+      changed_when: false
+      retries: 12
+      delay: 5
+      until: >-
+        ceph_health.rc == 0
+        and ('HEALTH_OK' in ceph_health.stdout or 'HEALTH_WARN' in ceph_health.stdout)
+      failed_when: ceph_health.rc != 0
+      tags: [verify]
+
+    - name: Verify the CephFS filesystem
+      ansible.builtin.command: ceph fs get {{ ceph_fs_name }}
+      register: ceph_fs_status
+      changed_when: false
+      failed_when: ceph_fs_status.rc != 0
+      tags: [verify]
+
+    - name: Wait for an active CephFS metadata server
+      ansible.builtin.command: ceph mds stat
+      register: ceph_mds_stat
+      changed_when: false
+      retries: 12
+      delay: 5
+      until: ceph_mds_stat.rc == 0 and 'up:active' in ceph_mds_stat.stdout
+      tags: [verify]
+
+- name: Configure the Mikrom hosts as Ceph clients
+  hosts: mikrom
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Require Debian 13 trixie
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'Debian'
+          - ansible_facts.distribution_major_version == '13'
+          - ansible_facts.architecture == 'x86_64'
+        fail_msg: This playbook supports Debian 13 trixie on x86_64 only.
+      tags: always
+
+  tasks:
+    - name: Configure Ceph client access
+      when: ceph_configure_mikrom_client | bool
+      tags: [ceph-client]
+      block:
+        - name: Install Ceph client tools
+          ansible.builtin.apt:
+            name: ceph-common
+            state: present
+            update_cache: true
+            cache_valid_time: 3600
+          when: ceph_client_install_tools | bool
+
+        - name: Create the Ceph configuration directory
+          ansible.builtin.file:
+            path: /etc/ceph
+            state: directory
+            owner: root
+            group: root
+            mode: '0750'
+
+        - name: Install the Ceph client configuration
+          ansible.builtin.copy:
+            content: "{{ hostvars[groups['ceph'] | first].ceph_client_conf_b64 | b64decode }}"
+            dest: /etc/ceph/ceph.conf
+            owner: root
+            group: root
+            mode: '0644'
+
+        - name: Install the Ceph admin keyring
+          ansible.builtin.copy:
+            content: "{{ hostvars[groups['ceph'] | first].ceph_client_keyring_b64 | b64decode }}"
+            dest: /etc/ceph/ceph.client.admin.keyring
+            owner: root
+            group: root
+            mode: '0600'
+          no_log: true
+
+        # Kernel CephFS mounts by the agent use name=admin,secretfile=...
+        - name: Install the Ceph admin secret
+          ansible.builtin.copy:
+            content: "{{ hostvars[groups['ceph'] | first].ceph_admin_secret }}"
+            dest: /etc/ceph/admin.secret
+            owner: root
+            group: root
+            mode: '0600'
+          no_log: true
+
+        # The agent maps RBD images through /sys/bus/rbd/add and mounts CephFS
+        # with the kernel client, so both modules must be loaded on agent hosts.
+        - name: Load the Ceph kernel modules
+          community.general.modprobe:
+            name: "{{ item }}"
+            state: present
+          loop:
+            - rbd
+            - ceph
+
+        - name: Persist the Ceph kernel modules across reboots
+          ansible.builtin.copy:
+            content: |
+              rbd
+              ceph
+            dest: /etc/modules-load.d/ceph.conf
+            owner: root
+            group: root
+            mode: '0644'
+
+  post_tasks:
+    - name: Verify cluster access from the Mikrom host
+      ansible.builtin.command: ceph -s
+      register: ceph_client_status
+      changed_when: false
+      retries: 6
+      delay: 5
+      until: ceph_client_status.rc == 0
+      failed_when: ceph_client_status.rc != 0
+      when: ceph_configure_mikrom_client | bool and ceph_client_install_tools | bool
+      tags: [verify]

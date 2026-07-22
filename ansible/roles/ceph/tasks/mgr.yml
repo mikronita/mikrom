@@ -1,0 +1,31 @@
+---
+- name: Create the manager data directory
+  ansible.builtin.file:
+    path: "/var/lib/ceph/mgr/{{ ceph_cluster_name }}-{{ ansible_facts.hostname }}"
+    state: directory
+    owner: ceph
+    group: ceph
+    mode: '0750'
+
+- name: Create the manager keyring
+  ansible.builtin.command:
+    cmd: >-
+      ceph auth get-or-create mgr.{{ ansible_facts.hostname }}
+      mon 'allow profile mgr' osd 'allow *' mds 'allow *'
+      -o /var/lib/ceph/mgr/{{ ceph_cluster_name }}-{{ ansible_facts.hostname }}/keyring
+    creates: /var/lib/ceph/mgr/{{ ceph_cluster_name }}-{{ ansible_facts.hostname }}/keyring
+  no_log: true
+
+- name: Secure the manager keyring
+  ansible.builtin.file:
+    path: "/var/lib/ceph/mgr/{{ ceph_cluster_name }}-{{ ansible_facts.hostname }}/keyring"
+    owner: ceph
+    group: ceph
+    mode: '0600'
+  no_log: true
+
+- name: Enable the Ceph manager
+  ansible.builtin.systemd_service:
+    name: "ceph-mgr@{{ ansible_facts.hostname }}"
+    enabled: true
+    state: started

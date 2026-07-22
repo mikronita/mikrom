@@ -1,0 +1,25 @@
+---
+- name: Read the client configuration
+  ansible.builtin.slurp:
+    src: /etc/ceph/ceph.conf
+  register: ceph_client_conf
+
+- name: Read the admin keyring
+  ansible.builtin.slurp:
+    src: /etc/ceph/ceph.client.admin.keyring
+  register: ceph_admin_keyring
+  no_log: true
+
+- name: Extract the admin secret
+  ansible.builtin.command: ceph-authtool -p -n client.admin /etc/ceph/ceph.client.admin.keyring
+  register: ceph_admin_secret_cmd
+  changed_when: false
+  no_log: true
+
+# Consumed by the mikrom client play through hostvars[groups['ceph'] | first].
+- name: Export client facts for the Mikrom hosts
+  ansible.builtin.set_fact:
+    ceph_client_conf_b64: "{{ ceph_client_conf.content }}"
+    ceph_client_keyring_b64: "{{ ceph_admin_keyring.content }}"
+    ceph_admin_secret: "{{ ceph_admin_secret_cmd.stdout | trim }}"
+  no_log: true

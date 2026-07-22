@@ -1,0 +1,135 @@
+---
+- name: Check for existing Ceph configuration
+  ansible.builtin.stat:
+    path: /etc/ceph/ceph.conf
+  register: ceph_conf
+
+- name: Read FSID from existing configuration
+  ansible.builtin.command: ceph-conf --lookup fsid
+  register: ceph_existing_fsid
+  changed_when: false
+  when: ceph_conf.stat.exists
+
+- name: Generate FSID for a new cluster
+  ansible.builtin.command: cat /proc/sys/kernel/random/uuid
+  register: ceph_generated_fsid
+  changed_when: false
+  when: not ceph_conf.stat.exists
+
+- name: Resolve the cluster FSID
+  ansible.builtin.set_fact:
+    ceph_fsid: "{{ (ceph_existing_fsid.stdout if ceph_conf.stat.exists else ceph_generated_fsid.stdout) | trim }}"
+
+- name: Install Ceph configuration
+  ansible.builtin.template:
+    src: ceph.conf.j2
+    dest: /etc/ceph/ceph.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Create monitor keyring
+  ansible.builtin.command:
+    cmd: >-
+      ceph-authtool --create-keyring /etc/ceph/ceph.mon.keyring
+      --gen-key -n mon. --cap mon 'allow *'
+    creates: /etc/ceph/ceph.mon.keyring
+  register: ceph_mon_keyring
+  no_log: true
+
+- name: Create admin keyring
+  ansible.builtin.command:
+    cmd: >-
+      ceph-authtool --create-keyring /etc/ceph/ceph.client.admin.keyring
+      --gen-key -n client.admin
+      --cap mon 'allow *' --cap osd 'allow *' --cap mds 'allow *' --cap mgr 'allow *'
+    creates: /etc/ceph/ceph.client.admin.keyring
+  no_log: true
+
+- name: Create OSD bootstrap keyring
+  ansible.builtin.command:
+    cmd: >-
+      ceph-authtool --create-keyring /var/lib/ceph/bootstrap-osd/ceph.keyring
+      --gen-key -n client.bootstrap-osd
+      --cap mon 'profile bootstrap-osd' --cap mgr 'allow r'
+    creates: /var/lib/ceph/bootstrap-osd/ceph.keyring
+  no_log: true
+
+- name: Import admin and bootstrap keys into the monitor keyring
+  ansible.builtin.command: >-
+    ceph-authtool /etc/ceph/ceph.mon.keyring --import-keyring {{ item }}
+  loop:
+    - /etc/ceph/ceph.client.admin.keyring
+    - /var/lib/ceph/bootstrap-osd/ceph.keyring
+  when: ceph_mon_keyring is changed
+  no_log: true
+
+- name: Secure Ceph keyrings
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: root
+    group: root
+    mode: '0600'
+  loop:
+    - /etc/ceph/ceph.mon.keyring
+    - /etc/ceph/ceph.client.admin.keyring
+    - /var/lib/ceph/bootstrap-osd/ceph.keyring
+  no_log: true
+
+- name: Extract the admin secret
+  ansible.builtin.command: ceph-authtool -p -n client.admin /etc/ceph/ceph.client.admin.keyring
+  register: ceph_admin_secret_cmd
+  changed_when: false
+  no_log: true
+
+- name: Install the admin secret for kernel CephFS mounts
+  ansible.builtin.copy:
+    content: "{{ ceph_admin_secret_cmd.stdout | trim }}"
+    dest: /etc/ceph/admin.secret
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+
+- name: Create the monitor map
+  ansible.builtin.command:
+    cmd: >-
+      monmaptool --create
+      --addv {{ ansible_facts.hostname }} [v2:{{ ceph_mon_address }}:3300,v1:{{ ceph_mon_address }}:6789]
+      --fsid {{ ceph_fsid }}
+      /etc/ceph/monmap
+    creates: /etc/ceph/monmap
+
+- name: Populate the monitor data store
+  ansible.builtin.command:
+    cmd: >-
+      ceph-mon --cluster {{ ceph_cluster_name }} --mkfs
+      -i {{ ansible_facts.hostname }}
+      --monmap /etc/ceph/monmap
+      --keyring /etc/ceph/ceph.mon.keyring
+    creates: /var/lib/ceph/mon/{{ ceph_cluster_name }}-{{ ansible_facts.hostname }}/kv_backend
+  register: ceph_mon_mkfs
+
+- name: Own the monitor data store by the ceph user
+  ansible.builtin.file:
+    path: "/var/lib/ceph/mon/{{ ceph_cluster_name }}-{{ ansible_facts.hostname }}"
+    state: directory
+    owner: ceph
+    group: ceph
+    recurse: true
+  when: ceph_mon_mkfs is changed
+
+- name: Enable the Ceph monitor
+  ansible.builtin.systemd_service:
+    name: "ceph-mon@{{ ansible_facts.hostname }}"
+    enabled: true
+    state: started
+
+- name: Wait for the monitor to answer
+  ansible.builtin.command: ceph -s
+  register: ceph_mon_status
+  changed_when: false
+  retries: 12
+  delay: 5
+  until: ceph_mon_status.rc == 0
+  failed_when: ceph_mon_status.rc != 0

@@ -1,0 +1,18 @@
+---
+- name: Install Ceph packages
+  ansible.builtin.include_tasks: install.yml
+
+- name: Bootstrap the Ceph monitor
+  ansible.builtin.include_tasks: mon.yml
+
+- name: Bootstrap the Ceph manager
+  ansible.builtin.include_tasks: mgr.yml
+
+- name: Provision the Ceph OSDs
+  ansible.builtin.include_tasks: osd.yml
+
+- name: Bootstrap the CephFS metadata server
+  ansible.builtin.include_tasks: mds.yml
+
+- name: Export the client configuration facts
+  ansible.builtin.include_tasks: export.yml

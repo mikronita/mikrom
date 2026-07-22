@@ -1,0 +1,18 @@
+---
+# Single-node Ceph cluster settings consumed by the ceph.yml playbook.
+ceph_cluster_name: ceph
+ceph_mon_address: "{{ ansible_host }}"
+ceph_public_network: 192.168.122.0/24
+
+# DESTRUCTIVE: ceph-volume wipes every device listed here and turns it into a
+# BlueStore OSD. Only add devices that hold no data.
+ceph_osd_devices:
+  - /dev/vdb
+
+# A single OSD keeps HEALTH_OK with size 1. After adding more OSDs, raise the
+# size (and min_size) and update existing pools with:
+#   ceph osd pool set <pool> size <n>
+ceph_osd_pool_default_size: 1
+ceph_osd_pool_default_min_size: 1
+
+ceph_fs_name: cephfs

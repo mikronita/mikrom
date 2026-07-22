@@ -113,3 +113,9 @@ mikrom_cloud_hypervisor_rootfs_sha256: ""
 
 mikrom_enable_telemetry: false
 mikrom_otel_endpoint: http://127.0.0.1:4318
+
+# Ceph client integration. ansible/ceph.yml deploys the cluster on the ceph
+# group and, when enabled, distributes /etc/ceph (ceph.conf, admin keyring and
+# admin secret) to the Mikrom hosts so the agent can reach the cluster.
+ceph_configure_mikrom_client: true
+ceph_client_install_tools: true

@@ -1,0 +1,15 @@
+[global]
+fsid = {{ ceph_fsid }}
+mon initial members = {{ ansible_facts.hostname }}
+mon host = [v2:{{ ceph_mon_address }}:3300,v1:{{ ceph_mon_address }}:6789]
+public network = {{ ceph_public_network }}
+
+auth cluster required = cephx
+auth service required = cephx
+auth client required = cephx
+
+osd pool default size = {{ ceph_osd_pool_default_size }}
+osd pool default min size = {{ ceph_osd_pool_default_min_size }}
+# Place replicas at the OSD level so additional OSDs on this same host can
+# provide redundancy until more cluster nodes exist.
+osd crush chooseleaf type = 0
