@@ -54,6 +54,7 @@ message AgentCommand {
     QueryMigrationRequest query_migration = 21;
     SetBalloonRequest set_balloon = 22;
     QueryBalloonRequest query_balloon = 23;
+    GetVolumeUsageRequest get_volume_usage = 24;
   }
 }
 
@@ -91,6 +92,18 @@ message CreateSnapshotRequest {
 message DeleteVolumeRequest {
   string volume_id = 1;
   string pool_name = 2;
+}
+
+message GetVolumeUsageRequest {
+  string volume_id = 1;
+  string pool_name = 2;
+}
+
+message GetVolumeUsageResponse {
+  bool success = 1;
+  string message = 2;
+  uint64 provisioned_bytes = 3;
+  uint64 used_bytes = 4;
 }
 
 message FirewallRule {

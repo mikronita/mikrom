@@ -519,9 +519,9 @@ impl AgentServer {
     ) -> anyhow::Result<()> {
         use mikrom_proto::agent::{
             AgentCommand, AttachVolumeResponse, CancelMigrationResponse, DeleteVmResponse,
-            DetachVolumeResponse, PauseVmResponse, QueryBalloonResponse, QueryMigrationResponse,
-            ResumeVmResponse, SetBalloonResponse, StartMigrationResponse, StartVmResponse,
-            StopVmResponse, UpdateFirewallResponse, VmSnapshotCreateResponse,
+            DetachVolumeResponse, GetVolumeUsageResponse, PauseVmResponse, QueryBalloonResponse,
+            QueryMigrationResponse, ResumeVmResponse, SetBalloonResponse, StartMigrationResponse,
+            StartVmResponse, StopVmResponse, UpdateFirewallResponse, VmSnapshotCreateResponse,
             VmSnapshotDeleteResponse, VmSnapshotListResponse, VmSnapshotRestoreResponse,
             agent_command::Command,
         };
@@ -688,6 +688,24 @@ impl AgentServer {
                 .await;
                 self.publish_generic_response(client, reply, res, "clone-volume")
                     .await;
+            },
+            Some(Command::GetVolumeUsage(req)) => {
+                let res = crate::ceph::CephRbd::volume_usage(&req.pool_name, &req.volume_id).await;
+                let response = match res {
+                    Ok((provisioned_bytes, used_bytes)) => GetVolumeUsageResponse {
+                        success: true,
+                        message: String::new(),
+                        provisioned_bytes,
+                        used_bytes,
+                    },
+                    Err(e) => GetVolumeUsageResponse {
+                        success: false,
+                        message: e.to_string(),
+                        provisioned_bytes: 0,
+                        used_bytes: 0,
+                    },
+                };
+                encode_and_publish_best_effort(client, reply, &response, "get-volume-usage").await;
             },
             Some(Command::VmSnapshotCreate(req)) => {
                 let hv = self.get_hypervisor_for_vm(&req.vm_id).await?;

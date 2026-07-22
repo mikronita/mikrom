@@ -15,6 +15,7 @@ pub const DELETE_VOLUME: &str = "mikrom.scheduler.delete_volume";
 pub const DELETE_SNAPSHOT: &str = "mikrom.scheduler.delete_snapshot";
 pub const RESTORE_SNAPSHOT: &str = "mikrom.scheduler.restore_snapshot";
 pub const CLONE_VOLUME: &str = "mikrom.scheduler.clone_volume";
+pub const GET_VOLUME_USAGE: &str = "mikrom.scheduler.get_volume_usage";
 pub const VM_SNAPSHOT_CREATE: &str = "mikrom.scheduler.vm_snapshot_create";
 pub const VM_SNAPSHOT_RESTORE: &str = "mikrom.scheduler.vm_snapshot_restore";
 pub const VM_SNAPSHOT_DELETE: &str = "mikrom.scheduler.vm_snapshot_delete";

@@ -266,6 +266,9 @@ impl NatsEventLoop {
         let mut clone_volume_sub = client
             .queue_subscribe(subjects::CLONE_VOLUME, queue_group.clone())
             .await?;
+        let mut get_volume_usage_sub = client
+            .queue_subscribe(subjects::GET_VOLUME_USAGE, queue_group.clone())
+            .await?;
         let mut vm_snapshot_create_sub = client
             .queue_subscribe(subjects::VM_SNAPSHOT_CREATE, queue_group.clone())
             .await?;
@@ -337,6 +340,7 @@ impl NatsEventLoop {
                 Some(msg) = delete_snapshot_sub.next() => self.handle_delete_snapshot(msg).await,
                 Some(msg) = restore_snapshot_sub.next() => self.handle_restore_snapshot(msg).await,
                 Some(msg) = clone_volume_sub.next() => self.handle_clone_volume(msg).await,
+                Some(msg) = get_volume_usage_sub.next() => self.handle_get_volume_usage(msg).await,
                 Some(msg) = vm_snapshot_create_sub.next() => self.handle_vm_snapshot_create(msg).await,
                 Some(msg) = vm_snapshot_restore_sub.next() => self.handle_vm_snapshot_restore(msg).await,
                 Some(msg) = vm_snapshot_delete_sub.next() => self.handle_vm_snapshot_delete(msg).await,
@@ -1213,6 +1217,38 @@ impl NatsEventLoop {
                 |e| mikrom_proto::scheduler::CloneVolumeResponse {
                     success: false,
                     message: e.to_string(),
+                },
+            )
+            .await;
+        });
+    }
+
+    async fn handle_get_volume_usage(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::GetVolumeUsageRequest,
+                mikrom_proto::scheduler::GetVolumeUsageResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::GET_VOLUME_USAGE,
+                "get-volume-usage-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.get_volume_usage(req).await }
+                },
+                |e| mikrom_proto::scheduler::GetVolumeUsageResponse {
+                    success: false,
+                    message: e.to_string(),
+                    provisioned_bytes: 0,
+                    used_bytes: 0,
                 },
             )
             .await;

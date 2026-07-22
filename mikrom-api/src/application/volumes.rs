@@ -11,7 +11,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -28,6 +28,12 @@ pub struct AttachVolumeRequest {
     pub mount_point: String,
     #[serde(default)]
     pub access_mode: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, rovo::schemars::JsonSchema)]
+pub struct VolumeUsageResponse {
+    pub provisioned_bytes: u64,
+    pub used_bytes: u64,
 }
 
 fn default_mount_point() -> String {
@@ -198,6 +204,46 @@ pub async fn list_all_volumes_handler(
     let tenant_id = tenant_ctx.tenant.id;
     let volumes = state.volume_repo.list_volumes_by_tenant(tenant_id).await?;
     Ok(Json(volumes))
+}
+
+#[rovo::rovo]
+pub async fn get_volume_usage_handler(
+    tenant_ctx: TenantContext,
+    State(state): State<crate::AppState>,
+    Path(volume_id): Path<Uuid>,
+) -> ApiResult<Json<VolumeUsageResponse>> {
+    let volume = state
+        .volume_repo
+        .get_volume(volume_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
+
+    if volume.tenant_id != tenant_ctx.tenant.id {
+        return Err(ApiError::Forbidden);
+    }
+
+    // Usage lives on the storage backend; query it through the scheduler.
+    let nats_req = mikrom_proto::scheduler::GetVolumeUsageRequest {
+        volume_id: volume_id.to_string(),
+        pool_name: volume.pool_name.clone(),
+        host_id: String::new(),
+    };
+
+    let resp: mikrom_proto::scheduler::GetVolumeUsageResponse = state
+        .nats
+        .with_timeout(storage_nats_timeout(&state))
+        .request("mikrom.scheduler.get_volume_usage", nats_req)
+        .await
+        .map_err(|e| ApiError::Scheduler(e.to_string()))?;
+
+    if !resp.success {
+        return Err(ApiError::Scheduler(resp.message));
+    }
+
+    Ok(Json(VolumeUsageResponse {
+        provisioned_bytes: resp.provisioned_bytes,
+        used_bytes: resp.used_bytes,
+    }))
 }
 
 #[rovo::rovo]

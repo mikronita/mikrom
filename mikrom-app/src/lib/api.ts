@@ -1477,6 +1477,22 @@ export async function listVolumeSnapshots(token: string, volumeId: string) {
   }
 }
 
+export interface VolumeUsage {
+  provisioned_bytes: number;
+  used_bytes: number;
+}
+
+export async function getVolumeUsage(token: string, volumeId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/volumes/${volumeId}/usage`, { headers: authHeaders(token) });
+    const result = await parseJson<VolumeUsage>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch volume usage") };
+    return { data: result as VolumeUsage };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
 export async function restoreVolumeSnapshot(token: string, volumeId: string, data: RestoreSnapshotRequest) {
   try {
     const response = await fetch(`${API_PROXY_BASE}/volumes/${volumeId}/restore`, {

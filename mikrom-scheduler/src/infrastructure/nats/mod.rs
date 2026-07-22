@@ -120,6 +120,7 @@ impl NatsAgentClient {
             mikrom_proto::agent::agent_command::Command::QueryMigration(_) => "query_migration",
             mikrom_proto::agent::agent_command::Command::SetBalloon(_) => "set_balloon",
             mikrom_proto::agent::agent_command::Command::QueryBalloon(_) => "query_balloon",
+            mikrom_proto::agent::agent_command::Command::GetVolumeUsage(_) => "get_volume_usage",
         }
     }
 
@@ -460,6 +461,32 @@ impl AgentClient for NatsAgentClient {
             ),
         )
         .await
+    }
+
+    async fn get_volume_usage(
+        &self,
+        host_id: &str,
+        volume_id: &str,
+        pool_name: &str,
+    ) -> DomainResult<(u64, u64)> {
+        let bytes = self
+            .send_command_raw(
+                host_id,
+                mikrom_proto::agent::agent_command::Command::GetVolumeUsage(
+                    mikrom_proto::agent::GetVolumeUsageRequest {
+                        volume_id: volume_id.to_string(),
+                        pool_name: pool_name.to_string(),
+                    },
+                ),
+            )
+            .await?;
+        let resp = mikrom_proto::agent::GetVolumeUsageResponse::decode(&bytes[..])
+            .map_err(|e| DomainError::Infrastructure(format!("Decode failed: {e}")))?;
+        if resp.success {
+            Ok((resp.provisioned_bytes, resp.used_bytes))
+        } else {
+            Err(DomainError::Infrastructure(resp.message))
+        }
     }
 
     async fn vm_snapshot_create(

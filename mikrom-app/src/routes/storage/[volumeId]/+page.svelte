@@ -41,10 +41,12 @@
     deleteVolume,
     deleteVolumeSnapshot,
     detachVolume,
+    getVolumeUsage,
     type AttachedVolume,
     type Volume,
     type VolumeAttachmentInfo,
     type VolumeSnapshot,
+    type VolumeUsage,
     type VolumeWithAttachments,
   } from "$lib/api";
   import { getToken } from "$lib/auth";
@@ -65,6 +67,15 @@
   let attachTargetAppId = "";
   let attachMountPoint = "/data";
   let attachAccessMode = "0";
+  let volumeUsage: VolumeUsage | null = null;
+  let usageLoading = true;
+
+  function formatBytes(bytes: number): string {
+    if (bytes >= 1024 * 1024 * 1024) {
+      return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GiB`;
+    }
+    return `${Math.round(bytes / (1024 * 1024))} MiB`;
+  }
 
   $: volume = $volumesStore.find((v) => v.id === volumeId);
   $: attachments = volume && "attachments" in volume ? (volume.attachments as VolumeAttachmentInfo[]) : [];
@@ -73,6 +84,10 @@
   $: volumeStatusLabel = isAttached ? "Attached" : "Available";
   $: volumeUpdatedAt = "updated_at" in (volume || {}) ? (volume as AttachedVolume | VolumeWithAttachments).updated_at : volume?.created_at || "";
   $: volumePoolName = volume?.pool_name ?? "";
+  $: usagePercent =
+    volumeUsage && volumeUsage.provisioned_bytes > 0
+      ? Math.min(100, Math.round((volumeUsage.used_bytes / volumeUsage.provisioned_bytes) * 100))
+      : 0;
 
   let activeTab: "overview" | "snapshots" | "settings" = "overview";
   const volumeTabs = [
@@ -85,7 +100,18 @@
     if ($appsStore.length === 0) {
       await refreshApps();
     }
+    await loadUsage();
   });
+
+  async function loadUsage() {
+    const token = getToken();
+    if (!token || !volumeId) return;
+
+    usageLoading = true;
+    const result = await getVolumeUsage(token, volumeId);
+    volumeUsage = result.data ?? null;
+    usageLoading = false;
+  }
 
   async function loadSnapshots() {
     if (!volume) return;
@@ -414,13 +440,31 @@
                 <CardTitle class="text-base">Usage Stats</CardTitle>
               </CardHeader>
               <CardContent class="grid gap-4">
-                <div class="flex items-center justify-between text-xs">
-                  <span class="text-muted-foreground">Provisioned</span>
-                  <span class="font-medium">{volume.size_mib} MiB</span>
-                </div>
-                <p class="text-xs text-muted-foreground">
-                  Live usage metrics are not exposed by the storage backend yet.
-                </p>
+                {#if usageLoading}
+                  <p class="text-xs text-muted-foreground">Loading usage...</p>
+                {:else if volumeUsage}
+                  <div class="flex flex-col gap-2">
+                    <div class="flex items-center justify-between text-xs">
+                      <span class="text-muted-foreground">Provisioned</span>
+                      <span class="font-medium">{formatBytes(volumeUsage.provisioned_bytes)}</span>
+                    </div>
+                    <div class="h-2 w-full rounded-full bg-muted">
+                      <div class="h-full rounded-full bg-primary" style={`width: ${usagePercent}%`}></div>
+                    </div>
+                    <div class="flex items-center justify-between text-[10px] text-muted-foreground">
+                      <span>Used: {formatBytes(volumeUsage.used_bytes)}</span>
+                      <span>Free: {formatBytes(volumeUsage.provisioned_bytes - volumeUsage.used_bytes)}</span>
+                    </div>
+                  </div>
+                {:else}
+                  <div class="flex items-center justify-between text-xs">
+                    <span class="text-muted-foreground">Provisioned</span>
+                    <span class="font-medium">{volume.size_mib} MiB</span>
+                  </div>
+                  <p class="text-xs text-muted-foreground">
+                    Live usage will be available once the volume is provisioned on the storage backend.
+                  </p>
+                {/if}
               </CardContent>
             </Card>
           </div>

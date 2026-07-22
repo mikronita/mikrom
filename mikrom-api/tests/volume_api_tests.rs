@@ -26,7 +26,9 @@ impl mikrom_api::nats::NatsClient for TestVolumeNats {
     async fn request_raw(&self, subject: String, _payload: Vec<u8>) -> anyhow::Result<Vec<u8>> {
         let success = matches!(
             subject.as_str(),
-            "mikrom.scheduler.create_volume" | "mikrom.scheduler.create_snapshot"
+            "mikrom.scheduler.create_volume"
+                | "mikrom.scheduler.create_snapshot"
+                | "mikrom.scheduler.get_volume_usage"
         );
         if !success {
             return Err(anyhow::anyhow!("unexpected subject: {}", subject));
@@ -42,11 +44,22 @@ impl mikrom_api::nats::NatsClient for TestVolumeNats {
                 &mut buf,
             )
             .unwrap();
-        } else {
+        } else if subject == "mikrom.scheduler.create_snapshot" {
             prost::Message::encode(
                 &mikrom_proto::scheduler::CreateSnapshotResponse {
                     success: true,
                     message: String::new(),
+                },
+                &mut buf,
+            )
+            .unwrap();
+        } else {
+            prost::Message::encode(
+                &mikrom_proto::scheduler::GetVolumeUsageResponse {
+                    success: true,
+                    message: String::new(),
+                    provisioned_bytes: 104857600,
+                    used_bytes: 20971520,
                 },
                 &mut buf,
             )
@@ -446,6 +459,106 @@ async fn list_snapshots_handler_rejects_other_tenant() {
             Request::builder()
                 .method("GET")
                 .uri(format!("/v1/volumes/{volume_id}/snapshots"))
+                .header("x-mikrom-tenant-id", "tenant")
+                .header("Authorization", auth_header(&token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn get_volume_usage_handler_returns_usage() {
+    let tenant_id = Uuid::new_v4();
+    let user_id = tenant_id;
+    let volume_id = Uuid::new_v4();
+    let (mut state, _, _, _) = build_state(tenant_id, user_id);
+
+    let mut volume_repo_mock = MockVolumeRepository::new();
+    volume_repo_mock.expect_get_volume().returning(move |_| {
+        Ok(Some(Volume {
+            id: volume_id,
+            tenant_id,
+            name: "test-vol".to_string(),
+            size_mib: 1024,
+            pool_name: "test-pool".to_string(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }))
+    });
+    state.volume_repo = Arc::new(volume_repo_mock);
+    state.ctx.volume_repo = state.volume_repo.clone();
+
+    let token = create_token(
+        &user_id.to_string(),
+        "test@example.com",
+        &UserRole::User,
+        "test-secret",
+    )
+    .unwrap();
+    let router = create_app(state);
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/v1/volumes/{volume_id}/usage"))
+                .header("x-mikrom-tenant-id", "tenant")
+                .header("Authorization", auth_header(&token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 1024)
+        .await
+        .unwrap();
+    let usage: mikrom_api::application::volumes::VolumeUsageResponse =
+        serde_json::from_slice(&body).unwrap();
+    assert_eq!(usage.provisioned_bytes, 104857600);
+    assert_eq!(usage.used_bytes, 20971520);
+}
+
+#[tokio::test]
+async fn get_volume_usage_handler_rejects_other_tenant() {
+    let tenant_id = Uuid::new_v4();
+    let other_tenant_id = Uuid::new_v4();
+    let user_id = tenant_id;
+    let volume_id = Uuid::new_v4();
+    let (mut state, _, _, _) = build_state(tenant_id, user_id);
+
+    let mut volume_repo_mock = MockVolumeRepository::new();
+    volume_repo_mock.expect_get_volume().returning(move |_| {
+        Ok(Some(Volume {
+            id: volume_id,
+            tenant_id,
+            name: "test-vol".to_string(),
+            size_mib: 1024,
+            pool_name: "test-pool".to_string(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }))
+    });
+    state.volume_repo = Arc::new(volume_repo_mock);
+    state.ctx.volume_repo = state.volume_repo.clone();
+
+    let token = create_token(
+        &other_tenant_id.to_string(),
+        "other@example.com",
+        &UserRole::User,
+        "test-secret",
+    )
+    .unwrap();
+    let router = create_app(state);
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/v1/volumes/{volume_id}/usage"))
                 .header("x-mikrom-tenant-id", "tenant")
                 .header("Authorization", auth_header(&token))
                 .body(Body::empty())

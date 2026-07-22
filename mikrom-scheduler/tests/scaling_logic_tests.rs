@@ -286,6 +286,9 @@ impl AgentClient for MockScalingAgentClient {
     async fn clone_volume(&self, _: &str, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
         Ok(())
     }
+    async fn get_volume_usage(&self, _: &str, _: &str, _: &str) -> DomainResult<(u64, u64)> {
+        Ok((0, 0))
+    }
     async fn vm_snapshot_create(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
         Ok(())
     }

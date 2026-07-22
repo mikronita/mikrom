@@ -257,6 +257,15 @@ impl AgentClient for RecordingAgentClient {
         Ok(())
     }
 
+    async fn get_volume_usage(
+        &self,
+        _host_id: &str,
+        _volume_id: &str,
+        _pool_name: &str,
+    ) -> DomainResult<(u64, u64)> {
+        Ok((0, 0))
+    }
+
     async fn vm_snapshot_create(&self, _h: &str, _v: &str, _s: &str) -> DomainResult<()> {
         Ok(())
     }

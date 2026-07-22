@@ -117,6 +117,26 @@ pub struct DeleteVolumeResponse {
     pub message: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetVolumeUsageRequest {
+    #[prost(string, tag = "1")]
+    pub volume_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub pool_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub host_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetVolumeUsageResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(uint64, tag = "3")]
+    pub provisioned_bytes: u64,
+    #[prost(uint64, tag = "4")]
+    pub used_bytes: u64,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateSnapshotRequest {
     #[prost(string, tag = "1")]
     pub volume_id: ::prost::alloc::string::String,

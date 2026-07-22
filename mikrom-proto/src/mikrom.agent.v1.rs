@@ -15,7 +15,7 @@ pub struct CheckHealthResponse {
 pub struct AgentCommand {
     #[prost(
         oneof = "agent_command::Command",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24"
     )]
     pub command: ::core::option::Option<agent_command::Command>,
 }
@@ -69,6 +69,8 @@ pub mod agent_command {
         SetBalloon(super::SetBalloonRequest),
         #[prost(message, tag = "23")]
         QueryBalloon(super::QueryBalloonRequest),
+        #[prost(message, tag = "24")]
+        GetVolumeUsage(super::GetVolumeUsageRequest),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -124,6 +126,24 @@ pub struct DeleteVolumeRequest {
     pub volume_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub pool_name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetVolumeUsageRequest {
+    #[prost(string, tag = "1")]
+    pub volume_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub pool_name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetVolumeUsageResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(uint64, tag = "3")]
+    pub provisioned_bytes: u64,
+    #[prost(uint64, tag = "4")]
+    pub used_bytes: u64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct FirewallRule {

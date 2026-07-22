@@ -395,6 +395,10 @@ pub fn create_app_with_rate_limits(
             post(crate::application::volumes::clone_volume_handler),
         )
         .route(
+            &format!("{}/volumes/{{volume_id}}/usage", crate::API_V1),
+            get(crate::application::volumes::get_volume_usage_handler),
+        )
+        .route(
             &format!("{}/volumes/{{volume_id}}", crate::API_V1),
             delete(crate::application::volumes::delete_volume_handler),
         )

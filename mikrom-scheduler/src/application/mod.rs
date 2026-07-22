@@ -405,6 +405,20 @@ impl AppService {
             .await
     }
 
+    pub async fn get_volume_usage(
+        &self,
+        host_id: &str,
+        volume_id: &str,
+        pool_name: &str,
+    ) -> DomainResult<(u64, u64)> {
+        let target_host = self.resolve_storage_host(host_id).await?;
+
+        self.context
+            .agent_client
+            .get_volume_usage(&target_host, volume_id, pool_name)
+            .await
+    }
+
     async fn pick_any_healthy_worker(&self) -> DomainResult<String> {
         let workers = self.context.worker_repo.get_available_workers(30).await?;
         if let Some(w) = workers.first() {
@@ -647,6 +661,15 @@ mod tests {
             _pool_name: &str,
         ) -> DomainResult<()> {
             Ok(())
+        }
+
+        async fn get_volume_usage(
+            &self,
+            _host_id: &str,
+            _volume_id: &str,
+            _pool_name: &str,
+        ) -> DomainResult<(u64, u64)> {
+            Ok((0, 0))
         }
 
         async fn vm_snapshot_create(

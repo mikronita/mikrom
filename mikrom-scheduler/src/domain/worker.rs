@@ -176,6 +176,12 @@ pub trait AgentClient: Send + Sync {
         target_volume_id: &str,
         pool_name: &str,
     ) -> DomainResult<()>;
+    async fn get_volume_usage(
+        &self,
+        host_id: &str,
+        volume_id: &str,
+        pool_name: &str,
+    ) -> DomainResult<(u64, u64)>;
 
     async fn vm_snapshot_create(
         &self,

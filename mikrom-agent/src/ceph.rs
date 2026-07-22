@@ -55,6 +55,16 @@ unsafe extern "C" {
         num_snaps: *mut libc::c_int,
     ) -> libc::c_int;
     fn rbd_snap_list_end(snaps: *mut rbd_snap_info_t);
+    fn rbd_diff_iterate2(
+        image: librbd_sys::rbd_image_t,
+        fromsnapname: *const libc::c_char,
+        ofs: u64,
+        len: u64,
+        include_parent: u8,
+        whole_object: u8,
+        cb: Option<unsafe extern "C" fn(u64, usize, libc::c_int, *mut libc::c_void) -> libc::c_int>,
+        arg: *mut libc::c_void,
+    ) -> libc::c_int;
 }
 
 #[repr(C)]
@@ -69,6 +79,22 @@ struct rbd_snap_info_t {
     id: u64,
     size: u64,
     name: *mut libc::c_char,
+}
+
+/// Accumulates the allocated extents reported by rbd_diff_iterate2, mirroring
+/// how `rbd du` computes the used bytes of an image.
+unsafe extern "C" fn accumulate_used_extents(
+    _ofs: u64,
+    len: usize,
+    exists: libc::c_int,
+    arg: *mut libc::c_void,
+) -> libc::c_int {
+    if exists != 0 && !arg.is_null() {
+        unsafe {
+            *(arg as *mut u64) += len as u64;
+        }
+    }
+    0
 }
 
 pub struct CephRbd;
@@ -721,6 +747,63 @@ impl CephRbd {
             warn!("Failed to unmap RBD device {}: {}", id, e);
         }
         Ok(())
+    }
+
+    /// Returns the (provisioned_bytes, used_bytes) of an image, like `rbd du`.
+    pub async fn volume_usage(pool: &str, name: &str) -> Result<(u64, u64)> {
+        info!("Reading RBD image usage natively: {}/{}", pool, name);
+        let pool = pool.to_string();
+        let name = name.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let io = Self::connect(&pool)?;
+            unsafe {
+                let name_c = CString::new(name.as_str())?;
+                let mut image: librbd_sys::rbd_image_t = ptr::null_mut();
+                let ret = rbd_open(io.handle, name_c.as_ptr(), &mut image, ptr::null());
+                if ret < 0 {
+                    return Err(anyhow!(
+                        "Failed to open RBD image {} for usage stats: {}",
+                        name,
+                        ret
+                    ));
+                }
+
+                let mut info: librbd_sys::rbd_image_info_t = Default::default();
+                let stat_ret = librbd_sys::rbd_stat(
+                    image,
+                    &mut info,
+                    std::mem::size_of::<librbd_sys::rbd_image_info_t>(),
+                );
+
+                let mut used_bytes: u64 = 0;
+                let diff_ret = if stat_ret >= 0 {
+                    rbd_diff_iterate2(
+                        image,
+                        ptr::null(),
+                        0,
+                        info.size,
+                        0,
+                        0,
+                        Some(accumulate_used_extents),
+                        &mut used_bytes as *mut u64 as *mut libc::c_void,
+                    )
+                } else {
+                    0
+                };
+                rbd_close(image);
+
+                if stat_ret < 0 {
+                    return Err(anyhow!("rbd_stat failed with code {}", stat_ret));
+                }
+                if diff_ret < 0 {
+                    return Err(anyhow!("rbd_diff_iterate2 failed with code {}", diff_ret));
+                }
+                Ok((info.size, used_bytes))
+            }
+        })
+        .await
+        .map_err(|e| anyhow!("Blocking task failed: {}", e))?
     }
 }
 

@@ -66,6 +66,7 @@ service SchedulerService {
   rpc DeleteSnapshot(DeleteSnapshotRequest) returns (DeleteSnapshotResponse);
   rpc RestoreSnapshot(RestoreSnapshotRequest) returns (RestoreSnapshotResponse);
   rpc CloneVolume(CloneVolumeRequest) returns (CloneVolumeResponse);
+  rpc GetVolumeUsage(GetVolumeUsageRequest) returns (GetVolumeUsageResponse);
 
   // VM runtime operations
   rpc VmSnapshotCreate(VmSnapshotCreateRequest) returns (VmSnapshotCreateResponse);
@@ -127,6 +128,19 @@ message DeleteVolumeRequest {
 message DeleteVolumeResponse {
   bool success = 1;
   string message = 2;
+}
+
+message GetVolumeUsageRequest {
+  string volume_id = 1;
+  string pool_name = 2;
+  string host_id = 3;
+}
+
+message GetVolumeUsageResponse {
+  bool success = 1;
+  string message = 2;
+  uint64 provisioned_bytes = 3;
+  uint64 used_bytes = 4;
 }
 
 message CreateSnapshotRequest {

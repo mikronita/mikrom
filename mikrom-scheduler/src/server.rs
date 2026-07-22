@@ -647,6 +647,32 @@ impl SchedulerServer {
         }
     }
 
+    pub async fn get_volume_usage(
+        &self,
+        req: mikrom_proto::scheduler::GetVolumeUsageRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::GetVolumeUsageResponse> {
+        match self
+            .app_service
+            .get_volume_usage(&req.host_id, &req.volume_id, &req.pool_name)
+            .await
+        {
+            Ok((provisioned_bytes, used_bytes)) => {
+                Ok(mikrom_proto::scheduler::GetVolumeUsageResponse {
+                    success: true,
+                    message: String::new(),
+                    provisioned_bytes,
+                    used_bytes,
+                })
+            },
+            Err(e) => Ok(mikrom_proto::scheduler::GetVolumeUsageResponse {
+                success: false,
+                message: format!("Failed to get volume usage: {}", e),
+                provisioned_bytes: 0,
+                used_bytes: 0,
+            }),
+        }
+    }
+
     pub async fn vm_snapshot_create(
         &self,
         req: mikrom_proto::scheduler::VmSnapshotCreateRequest,
