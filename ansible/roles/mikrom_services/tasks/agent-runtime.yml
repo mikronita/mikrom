@@ -123,3 +123,13 @@
     OUTPUT_DIR: /opt/firecracker
     DEBIAN_RELEASE: trixie
   when: mikrom_firecracker_rootfs_url | length == 0
+
+- name: Copy rootfs for Cloud Hypervisor
+  ansible.builtin.copy:
+    src: /opt/firecracker/base-rootfs.ext4
+    dest: /opt/cloud-hypervisor/base-rootfs.ext4
+    owner: root
+    group: root
+    mode: '0644'
+    remote_src: true
+  when: mikrom_cloud_hypervisor_rootfs_url | length == 0
