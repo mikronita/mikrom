@@ -795,7 +795,7 @@ pub async fn deploy_app(
     let disk_mib = payload.disk_mib.unwrap_or(1024);
     let env_vars = payload.env.clone().unwrap_or_default();
     let image = payload.image.clone();
-    let hypervisor = resolve_deployment_hypervisor(payload.hypervisor.as_deref());
+    let req_hypervisor = resolve_deployment_hypervisor(payload.hypervisor.as_deref());
     let owner_user_id =
         crate::application::tenant::resolve_tenant_owner_user_id(&state, tenant_ctx.tenant.id)
             .await?;
@@ -828,6 +828,21 @@ pub async fn deploy_app(
                 ));
             }
         },
+    };
+
+    let existing_hypervisor =
+        if let Ok(Some(active_dep)) = state.app_repo.get_active_deployment(app.id).await {
+            active_dep.hypervisor
+        } else if let Ok(deps) = state.app_repo.list_deployments_by_app(app.id).await {
+            deps.first().map(|d| d.hypervisor).unwrap_or(0)
+        } else {
+            0
+        };
+
+    let hypervisor = if req_hypervisor != 0 {
+        req_hypervisor
+    } else {
+        existing_hypervisor
     };
 
     let ent_service = crate::application::entitlements::EntitlementService::new(

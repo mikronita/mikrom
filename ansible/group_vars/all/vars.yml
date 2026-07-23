@@ -46,7 +46,7 @@ mikrom_railpack_sha256:
 mikrom_domain: mikrom.spluca.org
 mikrom_api_domain: api.mikrom.spluca.org
 mikrom_apps_domain: "apps.{{ mikrom_domain }}"
-mikrom_acme_email: admin@example.com
+mikrom_acme_email: admin@spluca.org
 mikrom_acme_staging: true
 mikrom_frontend_url: "https://{{ mikrom_domain }}"
 mikrom_app_host: "::"

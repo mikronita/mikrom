@@ -419,6 +419,19 @@ impl DeploymentService {
         let owner_user_id = resolve_tenant_owner_user_id(state, app.tenant_id).await?;
         let git_metadata = Self::fetch_app_git_metadata(state, &app).await;
         let final_port = params.port.unwrap_or(app.port);
+        let existing_hypervisor =
+            if let Ok(Some(active_dep)) = state.app_repo.get_active_deployment(app.id).await {
+                active_dep.hypervisor
+            } else if let Ok(deps) = state.app_repo.list_deployments_by_app(app.id).await {
+                deps.first().map(|d| d.hypervisor).unwrap_or(0)
+            } else {
+                0
+            };
+        let effective_hypervisor = if params.hypervisor != 0 {
+            params.hypervisor
+        } else {
+            existing_hypervisor
+        };
 
         if final_port != app.port {
             state
@@ -441,7 +454,7 @@ impl DeploymentService {
                 params.env.clone(),
                 "manual".to_string(),
                 git_metadata.as_ref(),
-                params.hypervisor,
+                effective_hypervisor,
             ))
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -459,6 +472,7 @@ impl DeploymentService {
                 deployment,
                 DeployVersionParams {
                     image: Some(image_tag),
+                    hypervisor: effective_hypervisor,
                     ..params
                 },
                 guard,
@@ -476,7 +490,7 @@ impl DeploymentService {
                 memory_mib: params.memory_mib.value() as u64,
                 disk_mib: params.disk_mib as u64,
                 env: params.env,
-                hypervisor: params.hypervisor,
+                hypervisor: effective_hypervisor,
                 guard,
             },
         )
@@ -504,6 +518,15 @@ impl DeploymentService {
         let disk_mib = 1024;
         let env_vars = HashMap::new();
 
+        let existing_hypervisor =
+            if let Ok(Some(active_dep)) = state.app_repo.get_active_deployment(app.id).await {
+                active_dep.hypervisor
+            } else if let Ok(deps) = state.app_repo.list_deployments_by_app(app.id).await {
+                deps.first().map(|d| d.hypervisor).unwrap_or(0)
+            } else {
+                0
+            };
+
         let deployment = state
             .app_repo
             .create_deployment(crate::domain::NewDeployment::from_handler(
@@ -517,7 +540,7 @@ impl DeploymentService {
                 env_vars.clone(),
                 "github_webhook".to_string(),
                 git_metadata,
-                0,
+                existing_hypervisor,
             ))
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -537,7 +560,7 @@ impl DeploymentService {
                 memory_mib: memory_mib.value() as u64,
                 disk_mib: disk_mib as u64,
                 env: env_vars,
-                hypervisor: 0,
+                hypervisor: existing_hypervisor,
                 guard,
             },
         )
