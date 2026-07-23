@@ -19,7 +19,19 @@ pub async fn handle(ctx: &CliContext, cmd: AppCommands, output: OutputFormat) ->
             cpu,
             memory,
             hypervisor,
-        } => deploy(ctx, &name, cpu, memory, hypervisor.as_deref(), output).await,
+            watch,
+        } => {
+            deploy(
+                ctx,
+                &name,
+                cpu,
+                memory,
+                hypervisor.as_deref(),
+                watch,
+                output,
+            )
+            .await
+        },
         AppCommands::Activate { app, deployment_id } => {
             activate(ctx, &app, &deployment_id, output).await
         },
@@ -34,6 +46,13 @@ pub async fn handle(ctx: &CliContext, cmd: AppCommands, output: OutputFormat) ->
             cpu,
             mem,
         } => scale(ctx, &name, replicas, auto, min, max, cpu, mem, output).await,
+        AppCommands::Logs { name, follow: _ } => {
+            ui::info(&format!(
+                "Streaming live logs for app '{}' (Ctrl+C to stop)...",
+                name
+            ));
+            ctx.client.stream_app_logs(&name).await
+        },
     }
 }
 
@@ -174,6 +193,7 @@ async fn deploy(
     cpu: Option<u32>,
     memory: Option<u32>,
     hypervisor: Option<&str>,
+    watch: bool,
     output: OutputFormat,
 ) -> CliResult<()> {
     let vcpus = match cpu {
@@ -212,25 +232,75 @@ async fn deploy(
         return Ok(());
     }
 
-    if let Some(job_id) = resp.job_id {
+    let job_id_opt = resp.job_id.clone();
+    if let Some(job_id) = &job_id_opt {
         ui::step(
             ui::SUCCESS,
             &format!(
                 "{} Deployment started. Job ID: {}",
                 ui::ROCKET,
-                ui::bold_cyan(&job_id)
+                ui::bold_cyan(job_id)
             ),
         );
-    } else if let Some(dep_id) = resp.deployment_id {
+    } else if let Some(dep_id) = &resp.deployment_id {
         ui::step(
             ui::SUCCESS,
             &format!(
                 "Deployment initiated. Deployment ID: {}",
-                ui::bold_cyan(&dep_id)
+                ui::bold_cyan(dep_id)
             ),
         );
     }
     ui::label_value(ui::INFO, "Status:", &ui::cyan_label(&resp.status));
+
+    if let (true, Some(job_id)) = (watch, job_id_opt) {
+        watch_deployment(ctx, name, &job_id).await?;
+    }
+    Ok(())
+}
+
+async fn watch_deployment(ctx: &CliContext, name: &str, job_id: &str) -> CliResult<()> {
+    ui::step(
+        ui::WAIT,
+        &format!("Watching deployment status for job '{}'...", job_id),
+    );
+    let mut attempts = 0;
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        attempts += 1;
+        match ctx.client.get_deployment_status(name, job_id).await {
+            Ok(status) => {
+                ui::info(&format!("Status [{}s]: {}", attempts * 2, status.status));
+                let s = status.status.to_uppercase();
+                if s == "RUNNING" || s == "ACTIVE" || s == "HEALTHY" {
+                    ui::step(
+                        ui::SUCCESS,
+                        &format!("Deployment {} is running and healthy!", job_id),
+                    );
+                    break;
+                } else if s == "FAILED" || s == "STOPPED" || s == "ERROR" {
+                    ui::error(&format!(
+                        "Deployment {} failed with status: {}",
+                        job_id, status.status
+                    ));
+                    break;
+                }
+            },
+            Err(e) => {
+                if attempts > 30 {
+                    ui::error(&format!("Timed out watching deployment status: {}", e));
+                    break;
+                }
+            },
+        }
+        if attempts >= 60 {
+            ui::step(
+                ui::WARN,
+                "Watch timeout reached (120s). Deployment is still processing in background.",
+            );
+            break;
+        }
+    }
     Ok(())
 }
 

@@ -124,6 +124,16 @@
   let appName = $derived(decodeURIComponent($page.params.appName ?? ""));
   let app = $derived($appsStore.find((item) => item.name === appName) ?? null);
   let appScaleState = $derived(app?.scale_state ?? "scaled_to_zero");
+  let scaleStateBadge = $derived.by(() => {
+    switch (appScaleState as string) {
+      case "active":
+        return { label: "Active", color: "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" };
+      case "scaled_to_zero":
+        return { label: "Scaled to Zero (Auto-Idle)", color: "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400" };
+      default:
+        return { label: String(appScaleState), color: "border-border bg-muted text-muted-foreground" };
+    }
+  });
 
   const lastNetwork = new SvelteMap<
     string,
@@ -507,6 +517,9 @@
               <Badge variant="secondary" class="uppercase">
                 {statusBadgeLabel}
               </Badge>
+              <span class="inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold tracking-wide transition-colors {scaleStateBadge.color}">
+                {scaleStateBadge.label}
+              </span>
               {#if app?.hostname}
                 <Badge variant="outline" class="truncate">
                   {app.hostname}

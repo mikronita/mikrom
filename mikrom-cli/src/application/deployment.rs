@@ -12,6 +12,17 @@ pub async fn handle(
     match cmd {
         DeploymentCommands::List => list(ctx, output).await,
         DeploymentCommands::Status { app, job_id } => status(ctx, &app, &job_id, output).await,
+        DeploymentCommands::Logs {
+            app,
+            job_id,
+            follow: _,
+        } => {
+            ui::info(&format!(
+                "Streaming live logs for job '{}' of app '{}' (Ctrl+C to stop)...",
+                job_id, app
+            ));
+            ctx.client.stream_deployment_logs(&app, &job_id).await
+        },
         DeploymentCommands::Stop { app, job_id } => stop(ctx, &app, &job_id, output).await,
         DeploymentCommands::Pause { app, job_id } => pause(ctx, &app, &job_id, output).await,
         DeploymentCommands::Resume { app, job_id } => resume(ctx, &app, &job_id, output).await,

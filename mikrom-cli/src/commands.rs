@@ -202,6 +202,13 @@ pub enum AppCommands {
             help = "Hypervisor type: firecracker, cloud-hypervisor, or unspecified (default)"
         )]
         hypervisor: Option<String>,
+        #[arg(
+            long,
+            short = 'w',
+            help = "Watch deployment progress until completion",
+            default_value_t = false
+        )]
+        watch: bool,
     },
     /// Activate/Rollback to a specific deployment
     Activate {
@@ -246,6 +253,13 @@ pub enum AppCommands {
         )]
         mem: Option<f64>,
     },
+    /// Stream real-time logs for an application
+    Logs {
+        #[arg(long, short, help = "Name of the application")]
+        name: String,
+        #[arg(long, short = 'f', help = "Follow log stream", default_value_t = true)]
+        follow: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -258,6 +272,15 @@ pub enum DeploymentCommands {
         app: String,
         #[arg(long, short, help = "The unique Job ID for this instance")]
         job_id: String,
+    },
+    /// Stream live logs of a specific deployment job instance
+    Logs {
+        #[arg(long, short, help = "Name of the application")]
+        app: String,
+        #[arg(long, short, help = "The unique Job ID for this instance")]
+        job_id: String,
+        #[arg(long, short = 'f', help = "Follow log stream", default_value_t = true)]
+        follow: bool,
     },
     /// Stop a running deployment (kills the instance)
     Stop {

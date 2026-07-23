@@ -6,7 +6,7 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "$lib/components";
   import { getToken } from "$lib/auth";
-  import { type LogLine, watchAppLogsSSE } from "$lib/api";
+  import { type LogLine, watchDeploymentLogsSSE } from "$lib/api";
   import { goto } from "$app/navigation";
 
   let appName = $derived(decodeURIComponent($page.params.appName ?? ""));
@@ -24,9 +24,9 @@
 
   onMount(() => {
     const token = getToken();
-    if (!token || !appName) return;
+    if (!token || !appName || !jobId) return;
 
-    const cleanup = watchAppLogsSSE(token, appName, (payload) => {
+    const cleanup = watchDeploymentLogsSSE(token, appName, jobId, (payload) => {
       const lines = Array.isArray(payload) ? payload : [payload];
       logs = [...logs, ...lines].slice(-1000);
       loading = false;

@@ -225,11 +225,13 @@ mod tests {
                 cpu,
                 memory,
                 hypervisor,
+                watch,
             }) => {
                 assert_eq!(name, "svc");
                 assert!(cpu.is_none());
                 assert!(memory.is_none());
                 assert!(hypervisor.is_none());
+                assert!(!watch);
             },
             _ => panic!("expected app deploy"),
         }
@@ -238,7 +240,7 @@ mod tests {
     #[test]
     fn test_cli_app_deploy_parses_resources() {
         let cli = Cli::try_parse_from([
-            "mikrom", "app", "deploy", "--name", "svc", "--cpu", "3", "--memory", "2G",
+            "mikrom", "app", "deploy", "--name", "svc", "--cpu", "3", "--memory", "2G", "--watch",
         ])
         .unwrap();
         match cli.command {
@@ -247,11 +249,13 @@ mod tests {
                 cpu,
                 memory,
                 hypervisor,
+                watch,
             }) => {
                 assert_eq!(name, "svc");
                 assert_eq!(cpu, Some(3));
                 assert_eq!(memory, Some(2048));
                 assert!(hypervisor.is_none());
+                assert!(watch);
             },
             _ => panic!("expected app deploy"),
         }

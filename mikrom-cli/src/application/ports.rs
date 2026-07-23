@@ -30,8 +30,10 @@ pub trait ApiClient: Send + Sync {
     ) -> CliResult<DeployResponse>;
     async fn activate_deployment(&self, app_id: &str, deployment_id: &str) -> CliResult<()>;
     async fn list_app_deployments(&self, app_id: &str) -> CliResult<Vec<DeploymentInfo>>;
+    async fn stream_app_logs(&self, app_name: &str) -> CliResult<()>;
 
     async fn list_active_deployments(&self) -> CliResult<Vec<LiveDeploymentInfo>>;
+    async fn stream_deployment_logs(&self, app_name: &str, job_id: &str) -> CliResult<()>;
     async fn get_deployment_status(
         &self,
         app_name: &str,

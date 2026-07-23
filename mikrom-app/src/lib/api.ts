@@ -1173,6 +1173,23 @@ export function watchAppLogsSSE(token: string, appName: string, onMessage: (logs
   );
 }
 
+export function watchDeploymentLogsSSE(
+  token: string,
+  appName: string,
+  jobId: string,
+  onMessage: (logs: LogLine | LogLine[]) => void
+) {
+  return createFetchSseStream(
+    `${API_PROXY_BASE}/apps/${encodeURIComponent(appName)}/deployments/${encodeURIComponent(jobId)}/logs`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+    (payload) => onMessage(payload as LogLine | LogLine[])
+  );
+}
+
 export async function listSecurityRules(token: string, appName: string) {
   try {
     const response = await fetch(`${API_PROXY_BASE}/apps/${appName}/security-groups`, { headers: authHeaders(token) });

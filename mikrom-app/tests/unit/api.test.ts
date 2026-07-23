@@ -9,6 +9,7 @@ import {
   listNotifications,
   watchAppLogsSSE,
   watchAppMetricsSSE,
+  watchDeploymentLogsSSE,
   watchDeploymentsSSE,
   watchMeshStatusSSE,
   watchWorkspaceEventsSSE,
@@ -80,6 +81,11 @@ describe("api SSE helpers", () => {
       "app logs",
       (handler: (payload: unknown) => void) => watchAppLogsSSE("secret-token", "starter", handler),
       "/api/v1/apps/starter/logs/stream",
+    ],
+    [
+      "deployment logs",
+      (handler: (payload: unknown) => void) => watchDeploymentLogsSSE("secret-token", "starter", "job-1", handler),
+      "/api/v1/apps/starter/deployments/job-1/logs",
     ],
   ] as const)("opens %s SSE with authorization headers", async (_label, openStream, expectedUrl) => {
     const read = vi

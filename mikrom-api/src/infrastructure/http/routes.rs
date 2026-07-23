@@ -57,6 +57,14 @@ pub fn create_app_with_rate_limits(
             get(crate::infrastructure::http::health::health),
         )
         .route(
+            &format!("{}/health/live", crate::API_V1),
+            get(crate::infrastructure::http::health::health_live),
+        )
+        .route(
+            &format!("{}/health/ready", crate::API_V1),
+            get(crate::infrastructure::http::health::health_ready),
+        )
+        .route(
             &format!("{}/health/stream", crate::API_V1),
             get(crate::infrastructure::http::health::health_stream),
         )

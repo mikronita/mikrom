@@ -59,6 +59,17 @@ async fn get_system_health(state: &crate::AppState) -> HashMap<String, String> {
 
     services.insert("API".to_string(), "ONLINE".to_string());
 
+    if state
+        .app_repo
+        .get_app_by_name("__health_check__")
+        .await
+        .is_ok()
+    {
+        services.insert("Database".to_string(), "ONLINE".to_string());
+    } else {
+        services.insert("Database".to_string(), "OFFLINE".to_string());
+    }
+
     use mikrom_proto::scheduler::{ListAppsRequest, ListAppsResponse};
     let nats_req = ListAppsRequest {
         tenant_id: "system".to_string(),
@@ -141,6 +152,33 @@ pub async fn health(State(state): State<crate::AppState>) -> Json<HealthResponse
         version: env!("CARGO_PKG_VERSION").to_string(),
         services,
     })
+}
+
+#[rovo::rovo]
+pub async fn health_live(State(_state): State<crate::AppState>) -> &'static str {
+    "OK"
+}
+
+#[rovo::rovo]
+pub async fn health_ready(
+    State(state): State<crate::AppState>,
+) -> Result<Json<HealthResponse>, (axum::http::StatusCode, Json<HealthResponse>)> {
+    let services = get_system_health(&state).await;
+    let all_online = services.values().all(|s| s == "ONLINE");
+    let resp = HealthResponse {
+        status: if all_online {
+            "ok".to_string()
+        } else {
+            "degraded".to_string()
+        },
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        services,
+    };
+    if all_online {
+        Ok(Json(resp))
+    } else {
+        Err((axum::http::StatusCode::SERVICE_UNAVAILABLE, Json(resp)))
+    }
 }
 
 #[rovo::rovo]

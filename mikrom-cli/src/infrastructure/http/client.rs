@@ -786,6 +786,71 @@ impl ApiClient for ReqwestApiClient {
         )
         .await
     }
+
+    async fn stream_app_logs(&self, app_name: &str) -> CliResult<()> {
+        self.stream_sse_endpoint(&format!("apps/{}/logs/stream", app_name))
+            .await
+    }
+
+    async fn stream_deployment_logs(&self, app_name: &str, job_id: &str) -> CliResult<()> {
+        self.stream_sse_endpoint(&format!("apps/{}/deployments/{}/logs", app_name, job_id))
+            .await
+    }
+}
+
+impl ReqwestApiClient {
+    async fn stream_sse_endpoint(&self, endpoint: &str) -> CliResult<()> {
+        let url = format!(
+            "{}/v1/{}",
+            self.base_url.trim_end_matches('/'),
+            endpoint.trim_start_matches('/')
+        );
+        let mut req = self
+            .http
+            .get(&url)
+            .header(reqwest::header::ACCEPT, "text/event-stream");
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
+        }
+        if let Some(slug) = &self.active_project_slug {
+            req = req.header("X-Project-Slug", slug);
+        }
+        let res = req.send().await.map_err(CliError::Http)?;
+        if !res.status().is_success() {
+            let status = res.status().as_u16();
+            let text = res.text().await.unwrap_or_default();
+            return Err(CliError::Api {
+                status,
+                message: text,
+            });
+        }
+        use futures_util::stream::StreamExt;
+        let mut stream = res.bytes_stream();
+        let mut buffer = String::new();
+        while let Some(chunk_res) = stream.next().await {
+            let chunk = chunk_res.map_err(CliError::Http)?;
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+            while let Some(pos) = buffer.find("\n\n") {
+                let event_block = buffer[..pos].to_string();
+                buffer.drain(..pos + 2);
+                for line in event_block.lines() {
+                    if let Some(data) = line.strip_prefix("data:") {
+                        let trimmed = data.trim();
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                            if let Some(msg) = parsed.get("line").and_then(|v| v.as_str()) {
+                                println!("{}", msg);
+                            } else {
+                                println!("{}", trimmed);
+                            }
+                        } else {
+                            println!("{}", trimmed);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
