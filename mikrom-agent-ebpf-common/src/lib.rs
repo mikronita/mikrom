@@ -4,8 +4,10 @@
 #[repr(u8)]
 pub enum Protocol {
     Any = 0,
+    Icmp = 1,
     Tcp = 6,
     Udp = 17,
+    Icmpv6 = 58,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -114,6 +114,17 @@ fn try_mikrom_egress(ctx: TcContext, ifindex: u32) -> Result<i32, ()> {
 
     let (transport_offset, protocol) = get_transport_offset_and_proto(&ctx, &ipv6hdr)?;
 
+    if protocol == 58 {
+        if let Ok(icmp_type) = ctx.load::<u8>(transport_offset) {
+            // Always allow ICMPv6 Neighbor Discovery Protocol (NDP) messages:
+            // Router Solicitation (133), Router Advertisement (134),
+            // Neighbor Solicitation (135), Neighbor Advertisement (136)
+            if icmp_type >= 133 && icmp_type <= 136 {
+                return Ok(TC_ACT_OK);
+            }
+        }
+    }
+
     let dst_port = match protocol {
         6 => {
             let tcphdr: TcpHdr = ctx.load(transport_offset).map_err(|_| ())?;
@@ -166,7 +177,12 @@ fn try_mikrom_egress(ctx: TcContext, ifindex: u32) -> Result<i32, ()> {
             use mikrom_agent_ebpf_common::Protocol;
             let rule_proto = rule.protocol;
             if rule_proto != Protocol::Any && rule_proto as u8 != protocol {
-                continue;
+                let is_icmp_match = (rule_proto == Protocol::Icmp
+                    || rule_proto == Protocol::Icmpv6)
+                    && (protocol == 1 || protocol == 58);
+                if !is_icmp_match {
+                    continue;
+                }
             }
 
             // Match port

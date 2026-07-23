@@ -606,6 +606,8 @@ impl AgentServer {
                         protocol: match r.protocol.to_lowercase().as_str() {
                             "tcp" => Protocol::Tcp,
                             "udp" => Protocol::Udp,
+                            "icmp" => Protocol::Icmp,
+                            "icmpv6" => Protocol::Icmpv6,
                             _ => Protocol::Any,
                         },
                         port_start: r.port_start as u16,
@@ -989,5 +991,26 @@ mod tests {
                 .hypervisor_type(),
             HypervisorType::Firecracker
         );
+    }
+
+    #[test]
+    fn firewall_protocol_parsing_supports_icmp_and_icmpv6() {
+        use mikrom_agent_ebpf_common::Protocol;
+
+        let parse_proto = |p: &str| match p.to_lowercase().as_str() {
+            "tcp" => Protocol::Tcp,
+            "udp" => Protocol::Udp,
+            "icmp" => Protocol::Icmp,
+            "icmpv6" => Protocol::Icmpv6,
+            _ => Protocol::Any,
+        };
+
+        assert_eq!(parse_proto("icmp"), Protocol::Icmp);
+        assert_eq!(parse_proto("ICMP"), Protocol::Icmp);
+        assert_eq!(parse_proto("icmpv6"), Protocol::Icmpv6);
+        assert_eq!(parse_proto("ICMPv6"), Protocol::Icmpv6);
+        assert_eq!(parse_proto("tcp"), Protocol::Tcp);
+        assert_eq!(parse_proto("udp"), Protocol::Udp);
+        assert_eq!(parse_proto("unknown"), Protocol::Any);
     }
 }
