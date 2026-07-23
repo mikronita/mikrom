@@ -43,8 +43,8 @@ mikrom_railpack_sha256:
   x86_64: 606403d40d7229e205554e0dba6bdaf8922308fa6447182dfc33dcc338a47a80
   aarch64: 0c4418d56877d67351f0853278235c003d2d94f8b3e58f4ca85ecb51bd07e851
 
-mikrom_domain: mikrom.example.com
-mikrom_api_domain: api.mikrom.example.com
+mikrom_domain: mikrom.spluca.org
+mikrom_api_domain: api.mikrom.spluca.org
 mikrom_apps_domain: "apps.{{ mikrom_domain }}"
 mikrom_acme_email: admin@example.com
 mikrom_acme_staging: true
