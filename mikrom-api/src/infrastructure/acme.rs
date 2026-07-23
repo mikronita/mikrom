@@ -9,9 +9,6 @@ use std::collections::HashSet;
 use std::time::Duration;
 use tracing::{error, info};
 
-const API_PUBLIC_HOSTNAME: &str = "api.mikrom.spluca.org";
-const WEB_PUBLIC_HOSTNAME: &str = "mikrom.spluca.org";
-
 #[allow(clippy::too_many_arguments)]
 pub async fn start_acme_worker(
     api_db: PgPool,
@@ -138,9 +135,7 @@ pub async fn run_acme_iteration(
     if !router_tls_hostname.trim().is_empty() {
         ensure_managed_domain(api_db, router_tls_hostname, false, true).await?;
     }
-    ensure_managed_domain(api_db, API_PUBLIC_HOSTNAME, false, true).await?;
-    ensure_managed_domain(api_db, WEB_PUBLIC_HOSTNAME, false, true).await?;
-    if !frontend_tls_hostname.trim().is_empty() && frontend_tls_hostname != WEB_PUBLIC_HOSTNAME {
+    if !frontend_tls_hostname.trim().is_empty() && frontend_tls_hostname != router_tls_hostname {
         ensure_managed_domain(api_db, frontend_tls_hostname, false, true).await?;
     }
 

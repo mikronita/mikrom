@@ -219,9 +219,10 @@ mod tests {
             workspace_events: tokio::sync::broadcast::channel(1).0,
             mesh_status:
                 tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
-            acme_email: "admin@mikrom.spluca.org".into(),
+            acme_email: "admin@mikrom.example.com".into(),
             acme_staging: true,
             acme_check_interval: 3600,
+            apps_domain: "apps.mikrom.example.com".into(),
             github_app_id: None,
             github_private_key: None,
             github_app_slug: None,

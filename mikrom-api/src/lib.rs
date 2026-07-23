@@ -90,14 +90,15 @@ pub fn normalize_app_slug(name: &str) -> Option<String> {
     (!collapsed.is_empty()).then_some(collapsed)
 }
 
-pub fn build_app_hostname(name: &str) -> ApiResult<String> {
+pub fn build_app_hostname(name: &str, apps_domain: &str) -> ApiResult<String> {
     let slug = normalize_app_slug(name).ok_or_else(|| {
         ApiError::BadRequest(
             "Application name must contain at least one alphanumeric character".to_string(),
         )
     })?;
 
-    Ok(format!("{}.apps.mikrom.spluca.org", slug))
+    let domain = apps_domain.trim().trim_start_matches('.');
+    Ok(format!("{}.{}", slug, domain))
 }
 
 #[cfg(test)]
@@ -120,14 +121,14 @@ mod tests {
     #[test]
     fn build_app_hostname_appends_platform_domain() {
         assert_eq!(
-            build_app_hostname(" My App! 1 ").unwrap(),
-            "my-app-1.apps.mikrom.spluca.org"
+            build_app_hostname(" My App! 1 ", "apps.mikrom.example.com").unwrap(),
+            "my-app-1.apps.mikrom.example.com"
         );
     }
 
     #[test]
     fn build_app_hostname_rejects_empty_values() {
-        let err = build_app_hostname("   ").unwrap_err();
+        let err = build_app_hostname("   ", "apps.mikrom.example.com").unwrap_err();
         assert!(matches!(err, crate::ApiError::BadRequest(_)));
     }
 
@@ -178,6 +179,7 @@ pub struct AppState {
     pub acme_email: String,
     pub acme_staging: bool,
     pub acme_check_interval: u64,
+    pub apps_domain: String,
     pub github_app_id: Option<String>,
     pub github_private_key: Option<String>,
     pub github_app_slug: Option<String>,
@@ -212,6 +214,7 @@ impl Default for AppState {
             acme_email: ctx.config.acme_email.clone(),
             acme_staging: ctx.config.acme_staging,
             acme_check_interval: ctx.config.acme_check_interval,
+            apps_domain: ctx.config.apps_domain.clone(),
             github_app_id: ctx.config.github_app_id.clone(),
             github_private_key: ctx.config.github_private_key.clone(),
             github_app_slug: ctx.config.github_app_slug.clone(),

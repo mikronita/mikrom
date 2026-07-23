@@ -94,9 +94,10 @@ async fn build_state(
             mikrom_api::application::vms::MeshStatus::default(),
         )
         .0,
-        acme_email: "admin@mikrom.spluca.org".to_string(),
+        acme_email: "admin@mikrom.example.com".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
+        apps_domain: "apps.mikrom.example.com".to_string(),
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,

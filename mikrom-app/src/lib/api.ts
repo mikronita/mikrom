@@ -4,7 +4,7 @@ import { logout } from "$lib/auth";
 import { createFetchSseStream } from "$lib/utils/sse";
 
 const PUBLIC_BASE = (
-  browser ? window.location.origin : env.PUBLIC_APP_URL || "https://mikrom.spluca.org"
+  browser ? window.location.origin : env.PUBLIC_APP_URL || "https://mikrom.example.com"
 )
   .replace("http://[::1]", "http://localhost")
   .replace("https://[::1]", "https://localhost")

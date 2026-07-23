@@ -157,7 +157,7 @@ const fn default_acme_staging() -> bool {
 }
 
 fn default_api_host() -> String {
-    "api.mikrom.spluca.org".to_string()
+    "api.mikrom.example.com".to_string()
 }
 
 fn default_api_upstream_url() -> String {
@@ -165,7 +165,7 @@ fn default_api_upstream_url() -> String {
 }
 
 fn default_dashboard_host() -> String {
-    "mikrom.spluca.org".to_string()
+    "mikrom.example.com".to_string()
 }
 
 fn default_dashboard_upstream_url() -> String {
@@ -173,11 +173,11 @@ fn default_dashboard_upstream_url() -> String {
 }
 
 fn default_default_site_host() -> String {
-    "debaser.spluca.org".to_string()
+    "debaser.example.com".to_string()
 }
 
 fn default_default_site_redirect_url() -> String {
-    "https://spluca.org/".to_string()
+    "https://example.com/".to_string()
 }
 
 fn default_api_upstream_targets() -> String {

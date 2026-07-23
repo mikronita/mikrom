@@ -73,6 +73,7 @@ async fn create_test_state(
         acme_email: "test@example.com".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
+        apps_domain: "apps.mikrom.example.com".to_string(),
         github_app_id: Some("123".to_string()),
         github_private_key: Some("dummy-key".to_string()),
         github_app_slug: Some("test-app".to_string()),

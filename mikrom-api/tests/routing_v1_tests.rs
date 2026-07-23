@@ -48,6 +48,12 @@ fn build_state() -> AppState {
     state.user_repo = Arc::new(user_repo);
     state.ctx.user_repo = state.user_repo.clone();
 
+    let mut app_repo = mikrom_api::domain::MockAppRepository::new();
+    app_repo.expect_get_app_by_name().returning(|_| Ok(None));
+    let app_repo = Arc::new(app_repo);
+    state.app_repo = app_repo.clone();
+    state.ctx.app_repo = app_repo;
+
     let tenant_repo = Arc::new(MockTenantRepository::new());
     state.tenant_repo = tenant_repo.clone();
     state.ctx.tenant_repo = tenant_repo;

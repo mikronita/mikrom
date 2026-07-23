@@ -31,6 +31,11 @@ fn build_state() -> AppState {
     let mut state = AppState::default();
     state.nats = TypedNatsClient::new_custom(Arc::new(OfflineNats));
     state.ctx.nats = state.nats.clone();
+    let mut app_repo = mikrom_api::domain::MockAppRepository::new();
+    app_repo.expect_get_app_by_name().returning(|_| Ok(None));
+    let app_repo = Arc::new(app_repo);
+    state.app_repo = app_repo.clone();
+    state.ctx.app_repo = app_repo;
     state.scheduler = Arc::new(MockScheduler::new());
     state.ctx.scheduler = state.scheduler.clone();
     state

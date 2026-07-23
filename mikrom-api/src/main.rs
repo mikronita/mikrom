@@ -138,6 +138,7 @@ async fn main() -> anyhow::Result<()> {
         acme_email: config.acme_email,
         acme_staging: config.acme_staging,
         acme_check_interval: config.acme_check_interval,
+        apps_domain: config.apps_domain,
         github_app_id: config.github_app_id,
         github_private_key: config.github_private_key,
         github_app_slug: config.github_app_slug,

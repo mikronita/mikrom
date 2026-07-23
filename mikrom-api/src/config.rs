@@ -68,6 +68,9 @@ pub struct ApiConfig {
     #[serde(default = "default_frontend_tls_hostname")]
     pub frontend_tls_hostname: String,
 
+    #[serde(default = "default_apps_domain")]
+    pub apps_domain: String,
+
     #[serde(default = "default_acme_check_interval")]
     pub acme_check_interval: u64,
 
@@ -137,6 +140,7 @@ impl Default for ApiConfig {
             acme_staging: default_acme_staging(),
             router_tls_hostname: default_router_tls_hostname(),
             frontend_tls_hostname: default_frontend_tls_hostname(),
+            apps_domain: default_apps_domain(),
             acme_check_interval: default_acme_check_interval(),
             certs_dir: None,
             github_app_id: None,
@@ -163,7 +167,7 @@ impl Default for ApiConfig {
 }
 
 fn default_acme_email() -> String {
-    "admin@mikrom.spluca.org".to_string()
+    "admin@mikrom.example.com".to_string()
 }
 
 fn default_acme_staging() -> bool {
@@ -171,11 +175,15 @@ fn default_acme_staging() -> bool {
 }
 
 fn default_router_tls_hostname() -> String {
-    "api.mikrom.spluca.org".to_string()
+    "api.mikrom.example.com".to_string()
 }
 
 fn default_frontend_tls_hostname() -> String {
-    "mikrom.spluca.org".to_string()
+    "mikrom.example.com".to_string()
+}
+
+fn default_apps_domain() -> String {
+    "apps.mikrom.example.com".to_string()
 }
 
 fn default_acme_check_interval() -> u64 {
@@ -191,7 +199,7 @@ fn default_router_addr() -> String {
 }
 
 fn default_frontend_url() -> String {
-    "https://mikrom.spluca.org".to_string()
+    "https://mikrom.example.com".to_string()
 }
 
 fn default_use_tls() -> bool {
@@ -256,6 +264,10 @@ impl ApiConfig {
             anyhow::bail!("FRONTEND_TLS_HOSTNAME must not be empty");
         }
 
+        if self.apps_domain.trim().is_empty() {
+            anyhow::bail!("APPS_DOMAIN must not be empty");
+        }
+
         Ok(())
     }
 }
@@ -268,8 +280,9 @@ mod tests {
     fn defaults_use_production_acme_and_router_hostname() {
         let config = ApiConfig::default();
         assert!(!config.acme_staging);
-        assert_eq!(config.router_tls_hostname, "api.mikrom.spluca.org");
-        assert_eq!(config.frontend_tls_hostname, "mikrom.spluca.org");
+        assert_eq!(config.router_tls_hostname, "api.mikrom.example.com");
+        assert_eq!(config.frontend_tls_hostname, "mikrom.example.com");
+        assert_eq!(config.apps_domain, "apps.mikrom.example.com");
     }
 
     #[test]

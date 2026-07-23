@@ -160,7 +160,7 @@ pub async fn create_app_handler(
             "Desired replicas cannot be greater than maximum replicas".to_string(),
         ));
     }
-    let hostname = build_app_hostname(&payload.name)?;
+    let hostname = build_app_hostname(&payload.name, &state.apps_domain)?;
 
     let tenant_id = tenant_ctx.tenant.id;
     let webhook_secret = Alphanumeric.sample_string(&mut rand::rng(), 32);
@@ -1014,6 +1014,7 @@ mod tests {
             acme_email: String::new(),
             acme_staging: true,
             acme_check_interval: 0,
+            apps_domain: "apps.mikrom.example.com".to_string(),
             github_app_id: None,
             github_private_key: None,
             github_app_slug: None,
