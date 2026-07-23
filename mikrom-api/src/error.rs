@@ -154,7 +154,17 @@ where
     S: Stream<Item = Result<Event, Infallible>> + Send + 'static,
 {
     fn into_response(self) -> Response {
-        self.0.into_response()
+        let mut res = self.0.into_response();
+        let headers = res.headers_mut();
+        headers.insert(
+            "x-accel-buffering",
+            axum::http::HeaderValue::from_static("no"),
+        );
+        headers.insert(
+            "cache-control",
+            axum::http::HeaderValue::from_static("no-cache, no-transform"),
+        );
+        res
     }
 }
 
@@ -212,5 +222,18 @@ mod tests {
         let error: ErrorResponse = serde_json::from_slice(&body).unwrap();
         assert_eq!(error.error, "Scheduler error: scheduler unavailable");
         assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE.as_u16());
+    }
+
+    #[tokio::test]
+    async fn sse_response_injects_unbuffered_proxy_headers() {
+        let stream = futures::stream::empty::<Result<Event, Infallible>>();
+        let sse = Sse::new(stream);
+        let response = SseResponse(sse).into_response();
+
+        assert_eq!(response.headers().get("x-accel-buffering").unwrap(), "no");
+        assert_eq!(
+            response.headers().get("cache-control").unwrap(),
+            "no-cache, no-transform"
+        );
     }
 }

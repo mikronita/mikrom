@@ -1,3 +1,5 @@
+import { logout } from "$lib/auth";
+
 export function consumeSseBuffer(buffer: string, onMessage: (payload: unknown) => void) {
   const normalizedBuffer = buffer.replace(/\r\n/g, "\n");
   const parts = normalizedBuffer.split("\n\n");
@@ -33,14 +35,26 @@ export function createFetchSseStream(
   url: string,
   init: RequestInit,
   onMessage: (payload: unknown) => void,
-  options: { retryDelayMs?: number } = {},
+  options: {
+    retryDelayMs?: number;
+    maxRetryDelayMs?: number;
+    onUnauthorized?: () => void;
+  } = {},
 ) {
   const controller = new AbortController();
-  const retryDelayMs = options.retryDelayMs ?? 1000;
+  const baseRetryDelayMs = options.retryDelayMs ?? 1000;
+  const maxRetryDelayMs = options.maxRetryDelayMs ?? 30000;
+  const handleUnauthorized = options.onUnauthorized ?? logout;
 
-  const wait = () =>
-    new Promise<void>((resolve) => {
-      const timer = setTimeout(() => resolve(), retryDelayMs);
+  let attemptCount = 0;
+
+  const wait = () => {
+    attemptCount += 1;
+    const exponentialDelay = baseRetryDelayMs * Math.pow(2, attemptCount - 1);
+    const delay = Math.min(maxRetryDelayMs, exponentialDelay);
+
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(() => resolve(), delay);
       controller.signal.addEventListener(
         "abort",
         () => {
@@ -50,6 +64,7 @@ export function createFetchSseStream(
         { once: true },
       );
     });
+  };
 
   void (async () => {
     while (!controller.signal.aborted) {
@@ -66,6 +81,7 @@ export function createFetchSseStream(
       }
 
       if (response.status === 401 || response.status === 403) {
+        handleUnauthorized();
         break;
       }
 
@@ -77,6 +93,9 @@ export function createFetchSseStream(
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+
+      // Successfully connected to response body
+      let receivedAnyData = false;
 
       while (!controller.signal.aborted) {
         let result: ReadableStreamReadResult<Uint8Array> | null;
@@ -95,6 +114,11 @@ export function createFetchSseStream(
 
         const { value, done } = result;
         if (done) break;
+
+        if (!receivedAnyData) {
+          receivedAnyData = true;
+          attemptCount = 0;
+        }
 
         buffer += decoder.decode(value, { stream: true });
         buffer = consumeSseBuffer(buffer, onMessage);

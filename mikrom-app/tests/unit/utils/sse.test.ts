@@ -24,7 +24,8 @@ describe("sse utils", () => {
     expect(onMessage).toHaveBeenCalledWith({ kind: "deployment_changed" });
   });
 
-  it("does not retry on unauthorized SSE responses", async () => {
+  it("does not retry on unauthorized SSE responses and calls onUnauthorized", async () => {
+    const onUnauthorized = vi.fn();
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
@@ -33,10 +34,16 @@ describe("sse utils", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    const cleanup = createFetchSseStream("/api/v1/workspace/events", {}, vi.fn());
+    const cleanup = createFetchSseStream(
+      "/api/v1/workspace/events",
+      {},
+      vi.fn(),
+      { onUnauthorized },
+    );
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
 
     await new Promise((resolve) => setTimeout(resolve, 20));

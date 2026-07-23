@@ -698,7 +698,7 @@ pub async fn get_deployment_logs(
     Ok(SseResponse(
         Sse::new(stream).keep_alive(
             axum::response::sse::KeepAlive::new()
-                .interval(std::time::Duration::from_secs(1))
+                .interval(std::time::Duration::from_secs(15))
                 .text("keep-alive"),
         ),
     ))

@@ -833,18 +833,24 @@ impl ReqwestApiClient {
             while let Some(pos) = buffer.find("\n\n") {
                 let event_block = buffer[..pos].to_string();
                 buffer.drain(..pos + 2);
+                let mut data_lines = Vec::new();
                 for line in event_block.lines() {
                     if let Some(data) = line.strip_prefix("data:") {
-                        let trimmed = data.trim();
-                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                            if let Some(msg) = parsed.get("line").and_then(|v| v.as_str()) {
-                                println!("{}", msg);
-                            } else {
-                                println!("{}", trimmed);
-                            }
+                        let content = data.strip_prefix(' ').unwrap_or(data);
+                        data_lines.push(content);
+                    }
+                }
+                if !data_lines.is_empty() {
+                    let combined = data_lines.join("\n");
+                    let trimmed = combined.trim();
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                        if let Some(msg) = parsed.get("line").and_then(|v| v.as_str()) {
+                            println!("{}", msg);
                         } else {
                             println!("{}", trimmed);
                         }
+                    } else {
+                        println!("{}", combined);
                     }
                 }
             }
@@ -886,5 +892,26 @@ mod tests {
             .delete_database("db-123")
             .await
             .expect("delete_database should use the longer delete timeout");
+    }
+
+    #[tokio::test]
+    async fn stream_sse_endpoint_handles_multiline_events() {
+        let server = MockServer::start().await;
+        let client = ReqwestApiClient::new(server.uri(), None, None).unwrap();
+
+        Mock::given(method("GET"))
+            .and(path("/v1/apps/my-app/logs/stream"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(
+                        "data: {\"line\":\"log row 1\"}\n\ndata: {\"line\":\"log row 2\"}\n\n",
+                    ),
+            )
+            .mount(&server)
+            .await;
+
+        let res = client.stream_app_logs("my-app").await;
+        assert!(res.is_ok());
     }
 }
