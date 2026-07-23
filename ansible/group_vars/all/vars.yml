@@ -49,7 +49,7 @@ mikrom_apps_domain: "apps.{{ mikrom_domain }}"
 mikrom_acme_email: admin@example.com
 mikrom_acme_staging: true
 mikrom_frontend_url: "https://{{ mikrom_domain }}"
-mikrom_app_host: 127.0.0.1
+mikrom_app_host: "::"
 mikrom_app_port: 3000
 
 # Local OCI registry running as a Docker container on the Mikrom host itself.

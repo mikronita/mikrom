@@ -233,16 +233,16 @@ test-init: ## Run mikrom-init tests
 # ── Run services: App and Dev ────────────────────────────────────────────────
 
 .PHONY: run-app
-run-app: ## Run mikrom-app dev server  (port 3001)
-	$(call in_dir,mikrom-app,pnpm run dev --host)
+run-app: ## Run mikrom-app dev server  (port 3000)
+	$(call in_dir,mikrom-app,pnpm run dev)
 
 .PHONY: build-app
 build-app: ## Build mikrom-app for production
 	$(call in_dir,mikrom-app,pnpm build)
 
 .PHONY: serve-app
-serve-app: build-app ## Build and serve mikrom-app in production mode (port 3001)
-	$(call in_dir,mikrom-app,ORIGIN=http://localhost:3001 PORT=3001 node build)
+serve-app: build-app ## Build and serve mikrom-app in production mode (port 3000)
+	$(call in_dir,mikrom-app,HOST=:: ORIGIN=http://localhost:3000 PORT=3000 node build)
 
 .PHONY: dev
 dev: ## Launch or attach to the tmux-based dev session

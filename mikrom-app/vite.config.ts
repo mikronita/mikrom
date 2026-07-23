@@ -6,6 +6,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   plugins: [tailwindcss(), sveltekit(), svelteTesting()],
   server: {
+    host: "::",
+    port: 3000,
     allowedHosts: ["mikrom.spluca.org"],
   },
   optimizeDeps: {
