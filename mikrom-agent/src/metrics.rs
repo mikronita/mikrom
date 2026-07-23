@@ -162,7 +162,7 @@ impl MetricsCollector {
         metrics.timestamp = now;
 
         // Collect VM metrics from all hypervisors
-        for (_htype, hv) in self.hypervisors.iter() {
+        for hv in self.hypervisors.values() {
             let vms_info = hv.get_all_vms().await;
 
             for vm in vms_info {

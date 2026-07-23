@@ -20,7 +20,7 @@ const TC_ACT_SHOT: i32 = 2;
 
 #[inline(always)]
 fn increment_stats(ifindex: u32, len: u64, is_tx: bool) {
-    if let Some(stats) = STATS.get_ptr_mut(&ifindex) {
+    if let Some(stats) = STATS.get_ptr_mut(ifindex) {
         unsafe {
             if is_tx {
                 (*stats).tx_bytes += len;
@@ -40,7 +40,7 @@ fn increment_stats(ifindex: u32, len: u64, is_tx: bool) {
                 rx_bytes: len,
             }
         };
-        let _ = STATS.insert(&ifindex, &initial, 0);
+        let _ = STATS.insert(ifindex, initial, 0);
     }
 }
 
@@ -131,7 +131,7 @@ fn try_mikrom_egress(ctx: TcContext, ifindex: u32) -> Result<i32, ()> {
 
     for i in 0..16 {
         let key = (ifindex << 4) | i;
-        let rule = unsafe { RULES.get(&key) };
+        let rule = unsafe { RULES.get(key) };
         if let Some(rule) = rule {
             has_rules = true;
 
