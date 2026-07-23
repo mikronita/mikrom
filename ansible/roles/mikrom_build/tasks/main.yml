@@ -76,6 +76,11 @@
   become_user: "{{ mikrom_build_user }}"
   notify: Rebuild Mikrom
 
+- name: Clean previous release binaries to ensure fresh build
+  ansible.builtin.file:
+    path: "{{ mikrom_install_dir }}/src/target/release"
+    state: absent
+
 - name: Check for compiled Mikrom API
   ansible.builtin.stat:
     path: "{{ mikrom_install_dir }}/src/target/release/mikrom-api"
