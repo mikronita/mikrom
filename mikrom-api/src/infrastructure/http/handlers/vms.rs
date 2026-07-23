@@ -1,4 +1,5 @@
 pub use crate::application::volumes::*;
+pub use std::convert::Infallible;
 
 use crate::application::deployment::{AppScaleState, resolve_app_scale_state};
 use crate::application::vms::{
@@ -17,7 +18,70 @@ use axum::{
 use tokio_stream::StreamExt;
 
 use futures::Stream;
-use std::convert::Infallible;
+
+fn normalize_log_payload(
+    payload: &[u8],
+    scale_state: Option<serde_json::Value>,
+    deployment_id: Option<String>,
+) -> serde_json::Value {
+    let normalize_obj = |mut obj: serde_json::Map<String, serde_json::Value>| -> serde_json::Value {
+        if let (None, Some(msg)) = (obj.get("line"), obj.get("message").cloned()) {
+            obj.insert("line".to_string(), msg);
+        }
+        if let Some(ts_num) = obj
+            .get("timestamp")
+            .and_then(|v| v.as_i64())
+            .filter(|&t| t > 100_000_000_000_000)
+        {
+            obj.insert(
+                "timestamp".to_string(),
+                serde_json::json!(ts_num / 1_000_000),
+            );
+        }
+        if let Some(ref scale) = scale_state {
+            obj.entry("scale_state".to_string())
+                .or_insert_with(|| scale.clone());
+        }
+        if let Some(ref dep_id) = deployment_id {
+            obj.entry("deployment_id".to_string())
+                .or_insert_with(|| serde_json::json!(dep_id));
+        }
+        serde_json::Value::Object(obj)
+    };
+
+    match serde_json::from_slice::<serde_json::Value>(payload) {
+        Ok(serde_json::Value::Array(arr)) => {
+            let normalized_arr: Vec<serde_json::Value> = arr
+                .into_iter()
+                .map(|item| match item {
+                    serde_json::Value::Object(obj) => normalize_obj(obj),
+                    other => other,
+                })
+                .collect();
+            serde_json::Value::Array(normalized_arr)
+        },
+        Ok(serde_json::Value::Object(obj)) => normalize_obj(obj),
+        Ok(other) => other,
+        Err(_) => {
+            let mut obj = serde_json::Map::new();
+            obj.insert(
+                "line".to_string(),
+                serde_json::Value::String(String::from_utf8_lossy(payload).to_string()),
+            );
+            obj.insert(
+                "timestamp".to_string(),
+                serde_json::json!(chrono::Utc::now().timestamp_millis()),
+            );
+            if let Some(ref scale) = scale_state {
+                obj.insert("scale_state".to_string(), scale.clone());
+            }
+            if let Some(ref dep_id) = deployment_id {
+                obj.insert("deployment_id".to_string(), serde_json::json!(dep_id));
+            }
+            serde_json::Value::Object(obj)
+        },
+    }
+}
 
 #[rovo::rovo]
 pub async fn app_logs_stream_handler(
@@ -50,29 +114,19 @@ pub async fn app_logs_stream_handler(
     let stream = async_stream::stream! {
         let mut nats_stream = nats_sub;
         while let Some(msg) = nats_stream.next().await {
-            let enriched = match serde_json::from_slice::<serde_json::Value>(&msg.payload) {
-                Ok(serde_json::Value::Object(mut obj)) => {
-                    obj.insert("scale_state".to_string(), serde_json::json!(scale_state));
-                    if let Some(active_deployment_id) = &active_deployment_id {
-                        obj.insert("deployment_id".to_string(), serde_json::json!(active_deployment_id));
-                    }
-                    serde_json::Value::Object(obj)
-                },
-                Ok(other) => other,
-                Err(_) => serde_json::json!({
-                    "line": String::from_utf8_lossy(&msg.payload).to_string(),
-                    "timestamp": chrono::Utc::now().timestamp_millis(),
-                    "scale_state": scale_state,
-                    "deployment_id": active_deployment_id,
-                }),
-            };
+            let scale_val = serde_json::to_value(scale_state).ok();
+            let enriched = normalize_log_payload(&msg.payload, scale_val, active_deployment_id.clone());
 
             yield Ok(Event::default().data(enriched.to_string()));
         }
     };
 
     Ok(SseResponse(
-        Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new()),
+        Sse::new(stream).keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(std::time::Duration::from_secs(15))
+                .text("keep-alive"),
+        ),
     ))
 }
 
@@ -654,7 +708,7 @@ pub async fn get_deployment_logs(
     Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<SseResponse<impl Stream<Item = Result<Event, Infallible>>>> {
     // 1. Validate app ownership and deployment connection
-    let _ = VmService::validate_app_deployment(
+    let (app, deployment) = VmService::validate_app_deployment(
         &state,
         &tenant_ctx.tenant.id.to_string(),
         &app_name,
@@ -662,7 +716,7 @@ pub async fn get_deployment_logs(
     )
     .await?;
 
-    // 2. Get VM ID from scheduler via NATS
+    // 2. Get VM ID from scheduler via NATS if available
     use mikrom_proto::scheduler::{AppStatusRequest, AppStatusResponse};
 
     let nats_req = AppStatusRequest {
@@ -670,30 +724,35 @@ pub async fn get_deployment_logs(
         tenant_id: tenant_ctx.tenant.id.to_string(),
     };
 
-    let inner: AppStatusResponse = state
+    let vm_id = match state
         .nats
-        .request("mikrom.scheduler.get_job", nats_req)
+        .request::<_, AppStatusResponse>("mikrom.scheduler.get_job", nats_req)
         .await
-        .map_err(|e| ApiError::Scheduler(e.to_string()))?;
+    {
+        Ok(inner) => inner.vm_id,
+        Err(_) => String::new(),
+    };
 
-    let vm_id = inner.vm_id;
-    if vm_id.is_empty() {
-        return Err(ApiError::BadRequest(
-            "VM is not yet active or assigned".to_string(),
-        ));
-    }
+    let subject = if !vm_id.is_empty() {
+        format!("mikrom.logs.{}.{}", app.id, vm_id)
+    } else {
+        format!("mikrom.logs.{}.>", app.id)
+    };
 
-    let subject = format!("mikrom.logs.{}", vm_id);
     let subscription = state
         .nats
         .subscribe(subject)
         .await
         .map_err(|e| ApiError::Internal(format!("Failed to subscribe to logs: {}", e)))?;
 
-    let stream = subscription.map(|msg| {
-        let text = String::from_utf8_lossy(&msg.payload).to_string();
-        Ok::<Event, std::convert::Infallible>(Event::default().data(text))
-    });
+    let dep_id = deployment.id.to_string();
+    let stream = async_stream::stream! {
+        let mut nats_stream = subscription;
+        while let Some(msg) = nats_stream.next().await {
+            let enriched = normalize_log_payload(&msg.payload, None, Some(dep_id.clone()));
+            yield Ok::<Event, Infallible>(Event::default().data(enriched.to_string()));
+        }
+    };
 
     Ok(SseResponse(
         Sse::new(stream).keep_alive(
@@ -1320,4 +1379,54 @@ pub async fn query_balloon_handler(
         "actual_memory_mib": actual,
         "max_memory_mib": max,
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_log_payload_array_batch() {
+        let agent_batch = serde_json::json!([
+            {
+                "vm_id": "vm-123",
+                "app_id": "app-456",
+                "source": "stdout",
+                "message": "Starting server...",
+                "timestamp": 1721700000000000000i64
+            }
+        ]);
+        let payload = serde_json::to_vec(&agent_batch).unwrap();
+        let normalized = normalize_log_payload(&payload, None, Some("job-789".to_string()));
+
+        assert!(normalized.is_array());
+        let arr = normalized.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        let item = &arr[0];
+        assert_eq!(item["line"], "Starting server...");
+        assert_eq!(item["timestamp"], 1721700000000i64);
+        assert_eq!(item["deployment_id"], "job-789");
+    }
+
+    #[test]
+    fn test_normalize_log_payload_single_object() {
+        let single = serde_json::json!({
+            "message": "DB connected",
+            "timestamp": 1721700000000000000i64
+        });
+        let payload = serde_json::to_vec(&single).unwrap();
+        let normalized = normalize_log_payload(&payload, None, None);
+
+        assert_eq!(normalized["line"], "DB connected");
+        assert_eq!(normalized["timestamp"], 1721700000000i64);
+    }
+
+    #[test]
+    fn test_normalize_log_payload_raw_string() {
+        let raw = b"Plain text log entry";
+        let normalized = normalize_log_payload(raw, None, Some("job-1".to_string()));
+
+        assert_eq!(normalized["line"], "Plain text log entry");
+        assert_eq!(normalized["deployment_id"], "job-1");
+    }
 }

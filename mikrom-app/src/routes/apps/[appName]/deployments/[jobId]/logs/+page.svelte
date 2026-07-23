@@ -27,8 +27,22 @@
     if (!token || !appName || !jobId) return;
 
     const cleanup = watchDeploymentLogsSSE(token, appName, jobId, (payload) => {
-      const lines = Array.isArray(payload) ? payload : [payload];
-      logs = [...logs, ...lines].slice(-1000);
+      const rawLines = Array.isArray(payload) ? payload : [payload];
+      const normalizedLines: LogLine[] = rawLines.map((rawItem: unknown) => {
+        const item = typeof rawItem === "object" && rawItem !== null ? (rawItem as Record<string, unknown>) : {};
+        const lineVal = item.line ?? item.message ?? (typeof rawItem === "string" ? rawItem : JSON.stringify(rawItem));
+        const line = typeof lineVal === "string" ? lineVal : String(lineVal);
+        const timestamp = typeof item.timestamp === "number"
+          ? (item.timestamp > 1e14 ? Math.floor(item.timestamp / 1_000_000) : item.timestamp)
+          : Date.now();
+        return {
+          line,
+          timestamp,
+          deployment_id: typeof item.deployment_id === "string" ? item.deployment_id : jobId,
+          scale_state: item.scale_state as LogLine["scale_state"],
+        };
+      });
+      logs = [...logs, ...normalizedLines].slice(-1000);
       loading = false;
     });
 

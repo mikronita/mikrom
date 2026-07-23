@@ -22,9 +22,13 @@ fn build_state(app: App) -> AppState {
 
     let mut app_repo = MockAppRepository::new();
     let app_for_repo = app.clone();
-    app_repo
-        .expect_get_app_by_name()
-        .returning(move |_| Ok(Some(app_for_repo.clone())));
+    app_repo.expect_get_app_by_name().returning(move |name| {
+        if !app_for_repo.name.is_empty() && name == app_for_repo.name {
+            Ok(Some(app_for_repo.clone()))
+        } else {
+            Ok(None)
+        }
+    });
 
     let tenant = mikrom_api::domain::Tenant {
         id: app.tenant_id,
@@ -67,6 +71,15 @@ fn build_state(app: App) -> AppState {
         .returning(|_| Ok(mikrom_proto::scheduler::ListAppsResponse { apps: vec![] }));
     state.scheduler = Arc::new(scheduler);
     state.ctx.scheduler = state.scheduler.clone();
+
+    let mut nats_mock = mikrom_api::nats::MockNatsClient::new();
+    nats_mock.expect_request_raw().returning(|_, _| {
+        Ok(prost::Message::encode_to_vec(
+            &mikrom_proto::scheduler::ListAppsResponse { apps: vec![] },
+        ))
+    });
+    state.nats = mikrom_api::nats::TypedNatsClient::new_custom(Arc::new(nats_mock));
+    state.ctx.nats = state.nats.clone();
     state
 }
 
@@ -295,7 +308,7 @@ async fn health_live_returns_ok() {
 
 #[tokio::test]
 async fn health_ready_returns_response() {
-    let app = create_app(AppState::default());
+    let app = create_app(build_state(App::default()));
     let response = app
         .oneshot(
             Request::builder()
@@ -310,4 +323,59 @@ async fn health_ready_returns_response() {
     assert!(
         response.status() == StatusCode::OK || response.status() == StatusCode::SERVICE_UNAVAILABLE
     );
+}
+
+#[tokio::test]
+async fn deployment_logs_route_requires_authentication() {
+    let app = create_app(AppState::default());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/apps/observed-app/deployments/job-123/logs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn deployment_logs_route_rejects_foreign_tenant() {
+    let app_tenant_id = Uuid::new_v4();
+    let foreign_tenant_id = Uuid::new_v4();
+    let app = App {
+        id: Uuid::new_v4(),
+        name: "observed-app".to_string(),
+        git_url: "https://github.com/test/repo".to_string(),
+        port: mikrom_api::domain::types::Port::new(8080).unwrap(),
+        tenant_id: app_tenant_id,
+        ..App::default()
+    };
+    let token = create_token(
+        &foreign_tenant_id.to_string(),
+        "test@example.com",
+        &UserRole::User,
+        "test-secret",
+    )
+    .unwrap();
+
+    let app_router = create_app(build_state(app));
+    let response = app_router
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/apps/observed-app/deployments/job-123/logs")
+                .header("x-mikrom-tenant-id", "tenant")
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
